@@ -1,0 +1,25 @@
+import * as React from "react";
+import { cn } from "@/lib/cn";
+
+interface SectionHeaderProps {
+  title: string;
+  description?: string;
+  actions?: React.ReactNode;
+  className?: string;
+}
+
+export function SectionHeader({ title, description, actions, className }: SectionHeaderProps) {
+  return (
+    <div className={cn("flex items-start justify-between gap-4", className)}>
+      <div className="min-w-0">
+        <h1 className="truncate text-xl font-semibold tracking-tight text-foreground">
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        ) : null}
+      </div>
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
