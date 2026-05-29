@@ -1,36 +1,32 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Campaign Workspace
 
-## Getting Started
+A frontend-first MVP foundation for a premium dark-mode AI SaaS workspace. The main surface is the Campaign Workspace, with AI ideation, mocked asynchronous generation, asset saving, brand guardrails, and a simple scheduler.
 
-First, run the development server:
+## Stack
+
+- Next.js App Router, React 19, TypeScript strict mode
+- Tailwind CSS v4 with local design tokens and Geist font
+- TanStack Query for async/server-like state
+- Zustand for local UI state
+- React Hook Form and Zod for generation forms
+- Framer Motion and Lucide React for restrained motion and iconography
+
+## Architecture
+
+- `src/app` keeps route files thin and follows App Router conventions.
+- `src/components/ui` contains local shadcn-style primitives.
+- `src/components/layout` contains the app shell, sidebar, topbar, and mobile navigation.
+- `src/features` owns feature UI for campaigns, AI workspace, assets, brand kit, scheduler, and dashboard summary.
+- `src/services` is the mocked backend boundary: AI, campaign, asset, scheduler, and auth calls all route through service files.
+- `src/types/domain.ts` defines backend-aware MVP entities: `User`, `Workspace`, `Campaign`, `BrandKit`, `AIGeneration`, `Asset`, and `ScheduledPost`.
+
+## Commands
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm.cmd run dev
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd run build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Open `http://localhost:3000` to use the MVP shell.
