@@ -81,6 +81,19 @@ export async function uploadToStorage(
 }
 
 /**
+ * Get file extension from content type
+ */
+function getFileExtension(contentType: string): string {
+  const mimeToExt: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/webp': 'webp',
+  };
+  return mimeToExt[contentType] || 'png';
+}
+
+/**
  * Download a file from a URL and re-upload to Supabase Storage.
  * Used to persist fal.ai or other temporary URLs.
  */
@@ -97,10 +110,15 @@ export async function persistRemoteImage(
 
   const buffer = await response.arrayBuffer();
   const contentType = response.headers.get("content-type") ?? "image/png";
+  const extension = getFileExtension(contentType);
   
   console.log(`[Storage] Fetched image: ${buffer.byteLength} bytes, contentType: ${contentType}`);
 
-  return uploadToStorage(storagePath, Buffer.from(buffer), contentType);
+  // Update storage path to match actual file extension
+  const correctedPath = storagePath.replace(/\.[^.]+$/, `.${extension}`);
+  console.log(`[Storage] Corrected path from ${storagePath} to ${correctedPath}`);
+
+  return uploadToStorage(correctedPath, Buffer.from(buffer), contentType);
 }
 
 /**
