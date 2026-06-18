@@ -68,6 +68,7 @@ export type AIGeneration = {
   createdAt: string;
   completedAt?: string;
   errorMessage?: string;
+  enhancedPrompt?: string;
 };
 
 export type ScheduledPost = {

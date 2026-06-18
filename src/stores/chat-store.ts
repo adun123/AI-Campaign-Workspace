@@ -19,7 +19,7 @@ export type ChatMessage = {
   role: "user" | "ai";
   content: string;
   assets?: Asset[];
-  imageAttachments?: string[]; // filenames for display
+  imageAttachments?: { name: string; preview: string }[]; // image previews for display
   timestamp: string;
 };
 
