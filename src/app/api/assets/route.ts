@@ -8,12 +8,14 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const campaignId = searchParams.get("campaign_id");
+  const status = searchParams.get("status") ?? "saved";
 
   const supabase = await createClient();
   let query = supabase
     .from("assets")
     .select("*, campaigns!inner(workspace_id)")
     .eq("campaigns.workspace_id", workspaceId)
+    .eq("status", status)
     .order("created_at", { ascending: false });
 
   if (campaignId) query = query.eq("campaign_id", campaignId);
