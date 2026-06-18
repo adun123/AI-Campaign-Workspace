@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -12,6 +13,7 @@ type FormData = { email: string; password: string };
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const { register, handleSubmit, formState: { isSubmitting } } = useForm<FormData>();
 
   async function onSubmit(data: FormData) {
@@ -52,7 +54,17 @@ export default function LoginPage() {
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-text-muted">Password</label>
-            <Input type="password" placeholder="••••••••" {...register("password", { required: true })} />
+            <div className="relative">
+              <Input type={showPassword ? "text" : "password"} placeholder="••••••••" {...register("password", { required: true })} />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
 
           {error && <p className="text-xs text-error">{error}</p>}
