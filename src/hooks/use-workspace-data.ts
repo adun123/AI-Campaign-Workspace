@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { getActiveCampaign } from "@/services/campaign.service";
+import { listCampaigns, getActiveCampaign, getCampaignById } from "@/services/campaign.service";
 import { getSession } from "@/services/auth.service";
 import { listAssets } from "@/services/asset.service";
 import { listGenerations } from "@/services/ai.service";
@@ -13,8 +13,20 @@ export function useSessionQuery() {
   return useQuery({ queryKey: ["session"], queryFn: getSession });
 }
 
+export function useCampaignsQuery() {
+  return useQuery({ queryKey: ["campaigns"], queryFn: listCampaigns });
+}
+
 export function useActiveCampaignQuery() {
   return useQuery({ queryKey: ["active-campaign"], queryFn: getActiveCampaign });
+}
+
+export function useCampaignByIdQuery(id?: string) {
+  return useQuery({
+    queryKey: ["campaign", id],
+    queryFn: () => getCampaignById(id!),
+    enabled: Boolean(id),
+  });
 }
 
 export function useAssetsQuery(campaignId?: string) {

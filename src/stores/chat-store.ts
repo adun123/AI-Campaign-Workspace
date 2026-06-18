@@ -24,40 +24,113 @@ export type ChatMessage = {
 };
 
 type ChatState = {
+  // Per-campaign messages storage
+  campaignMessages: Record<string, ChatMessage[]>;
+  currentCampaignId: string | null;
+
+  // Current active messages (derived from campaignMessages)
   messages: ChatMessage[];
+
+  // Actions
+  setCampaign: (campaignId: string) => void;
   addMessage: (msg: Omit<ChatMessage, "id" | "timestamp">) => void;
   loadHistory: (msgs: ChatMessage[]) => void;
+  clearCampaignChat: (campaignId: string) => void;
+
+  // Mode and model
   mode: GenerationMode;
   setMode: (mode: GenerationMode) => void;
   model: AIModel;
   setModel: (model: AIModel) => void;
+  aspectRatio: string;
+  setAspectRatio: (ar: string) => void;
+
+  // Image attachments
   attachedImages: AttachedFile[];
   addImages: (files: File[]) => void;
   removeImage: (id: string) => void;
   clearImages: () => void;
 };
 
-export const useChatStore = create<ChatState>((set) => ({
-  messages: [
-    {
-      id: "welcome",
-      role: "ai",
-      content: "Tell me what you want to launch. I'll keep the brand kit, channels, and campaign settings in context.",
+function getWelcomeMessage(): ChatMessage {
+  return {
+    id: "welcome",
+    role: "ai",
+    content: "Tell me what you want to launch. I'll keep the brand kit, channels, and campaign settings in context.",
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export const useChatStore = create<ChatState>((set, get) => ({
+  campaignMessages: {},
+  currentCampaignId: null,
+  messages: [getWelcomeMessage()],
+
+  setCampaign: (campaignId: string) => {
+    const state = get();
+    const existingMessages = state.campaignMessages[campaignId];
+
+    set({
+      currentCampaignId: campaignId,
+      messages: existingMessages ?? [getWelcomeMessage()],
+      attachedImages: [],
+    });
+  },
+
+  addMessage: (msg) => {
+    const state = get();
+    if (!state.currentCampaignId) return;
+
+    const newMessage: ChatMessage = {
+      ...msg,
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       timestamp: new Date().toISOString(),
-    },
-  ],
-  addMessage: (msg) =>
-    set((state) => ({
-      messages: [
-        ...state.messages,
-        { ...msg, id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: new Date().toISOString() },
-      ],
-    })),
-  loadHistory: (msgs) => set({ messages: msgs }),
+    };
+
+    const currentMessages = state.campaignMessages[state.currentCampaignId] ?? [getWelcomeMessage()];
+    const updatedMessages = [...currentMessages, newMessage];
+
+    set({
+      messages: updatedMessages,
+      campaignMessages: {
+        ...state.campaignMessages,
+        [state.currentCampaignId]: updatedMessages,
+      },
+    });
+  },
+
+  loadHistory: (msgs) => {
+    const state = get();
+    if (!state.currentCampaignId) return;
+
+    set({
+      messages: msgs,
+      campaignMessages: {
+        ...state.campaignMessages,
+        [state.currentCampaignId]: msgs,
+      },
+    });
+  },
+
+  clearCampaignChat: (campaignId: string) => {
+    const state = get();
+    const newCampaignMessages = { ...state.campaignMessages };
+    delete newCampaignMessages[campaignId];
+
+    const isActive = state.currentCampaignId === campaignId;
+    set({
+      campaignMessages: newCampaignMessages,
+      ...(isActive ? { messages: [getWelcomeMessage()] } : {}),
+    });
+  },
+
   mode: "text-to-image",
   setMode: (mode) => set({ mode }),
   model: "auto",
   setModel: (model) => set({ model }),
+  aspectRatio: "1:1" as string,
+  setAspectRatio: (ar: string) => set({ aspectRatio: ar }),
+
   attachedImages: [],
   addImages: (files) =>
     set((state) => {
