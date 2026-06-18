@@ -341,12 +341,12 @@ export function SchedulerView() {
         {/* Scheduled posts list */}
         <div className="space-y-4">
           {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
             <FilterPill label="All" active={statusFilter === "all"} onClick={() => setStatusFilter("all")} />
             <FilterPill label="Draft" active={statusFilter === "draft"} onClick={() => setStatusFilter("draft")} />
             <FilterPill label="Scheduled" active={statusFilter === "scheduled"} onClick={() => setStatusFilter("scheduled")} />
             <FilterPill label="Published" active={statusFilter === "published"} onClick={() => setStatusFilter("published")} />
-            <div className="mx-1 h-4 w-px bg-border" />
+            <div className="shrink-0 mx-0.5 h-4 w-px bg-border self-center" />
             <FilterPill label="All channels" active={channelFilter === "all"} onClick={() => setChannelFilter("all")} />
             {channels.map((ch) => (
               <FilterPill key={ch} label={ch} active={channelFilter === ch} onClick={() => setChannelFilter(ch)} />
@@ -410,11 +410,11 @@ export function SchedulerView() {
 function StatCard({ label, value, icon: Icon }: { label: string; value: number; icon: typeof CalendarClock }) {
   return (
     <Card className="p-3 sm:p-4">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 text-accent" />
-        <span className="text-xs font-medium text-text-muted">{label}</span>
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-accent" />
+        <span className="text-[10px] sm:text-xs font-medium text-text-muted leading-tight">{label}</span>
       </div>
-      <p className="mt-2 text-xl sm:text-2xl font-semibold text-text-primary">{value}</p>
+      <p className="mt-1.5 sm:mt-2 text-xl sm:text-2xl font-semibold text-text-primary">{value}</p>
     </Card>
   );
 }
@@ -457,9 +457,9 @@ function ScheduleCard({
 
   return (
     <Card className="group transition hover:border-accent/30">
-      <div className="flex items-center gap-3 p-3">
+      <div className="flex items-start gap-3 p-3 sm:items-center">
         {/* Thumbnail */}
-        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-control bg-surface-muted">
+        <div className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 overflow-hidden rounded-control bg-surface-muted">
           {asset?.kind === "image" && asset.preview ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={asset.preview} alt={asset.title} className="h-full w-full object-cover" />
@@ -471,25 +471,24 @@ function ScheduleCard({
         </div>
 
         {/* Info */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-1.5">
           <p className="truncate text-sm font-medium text-text-primary">
             {asset?.title ?? "Unknown asset"}
           </p>
-          <div className="mt-1 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <span className="flex items-center gap-1 text-xs text-text-muted">
               <Clock className="h-3 w-3" />
               {time}
             </span>
             <span className={`h-2 w-2 rounded-full ${channelColors[post.channel]}`} />
             <span className="text-xs text-text-muted">{post.channel}</span>
+            <Badge tone={status.tone} className="ml-auto shrink-0 sm:hidden">{status.label}</Badge>
           </div>
         </div>
 
-        {/* Status + actions */}
-        <div className="flex items-center gap-1.5">
+        {/* Status + actions - desktop */}
+        <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           <Badge tone={status.tone}>{status.label}</Badge>
-
-          {/* Quick status change */}
           {post.status !== "published" && (
             <button
               type="button"
@@ -502,8 +501,6 @@ function ScheduleCard({
               <CheckCircle className="h-3.5 w-3.5" />
             </button>
           )}
-
-          {/* Edit */}
           <button
             type="button"
             onClick={onEdit}
@@ -513,8 +510,6 @@ function ScheduleCard({
           >
             <Edit2 className="h-3.5 w-3.5" />
           </button>
-
-          {/* Delete */}
           <button
             type="button"
             onClick={onDelete}
@@ -526,6 +521,38 @@ function ScheduleCard({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
+      </div>
+
+      {/* Actions - mobile bottom row */}
+      <div className="flex sm:hidden items-center justify-end gap-1 border-t px-3 py-2">
+        {post.status !== "published" && (
+          <button
+            type="button"
+            onClick={() => onStatusChange(nextStatus[post.status])}
+            disabled={updatingStatus}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-text-muted transition active:bg-success/15 active:text-success disabled:opacity-50"
+            aria-label={nextStatusLabel[post.status]}
+          >
+            <CheckCircle className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-text-muted transition active:bg-accent/15 active:text-accent"
+          aria-label="Edit"
+        >
+          <Edit2 className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={deleting}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-text-muted transition active:bg-error/15 active:text-error disabled:opacity-50"
+          aria-label="Delete"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
       </div>
     </Card>
   );

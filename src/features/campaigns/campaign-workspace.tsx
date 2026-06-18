@@ -701,7 +701,7 @@ function ExpandableHistory({ history, onSelect, onDelete }: { history: AIGenerat
                   <p className="line-clamp-2 text-xs font-medium leading-4 text-text-primary">{gen.prompt}</p>
                   <p className="mt-1 text-xs text-text-muted">{outputAssets.length} assets</p>
                 </button>
-                <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(gen.id); }} aria-label="Delete" className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-error group-hover:opacity-100">
+                <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(gen.id); }} aria-label="Delete" className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white opacity-100 transition hover:bg-error md:opacity-0 md:group-hover:opacity-100">
                   <Trash2 className="h-3 w-3" />
                 </button>
               </div>
