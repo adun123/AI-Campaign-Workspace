@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeading } from "@/components/shared/section-heading";
 import { useAssetsQuery } from "@/hooks/use-workspace-data";
 import { deleteAsset } from "@/services/asset.service";
-import { scheduleAsset } from "@/services/scheduler.service";
+import { scheduleAsset, type SchedulePostInput } from "@/services/scheduler.service";
 import { useToastStore } from "@/stores/toast-store";
 import type { Asset, AssetKind, CampaignChannel } from "@/types/domain";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,16 @@ export function AssetLibrary() {
   });
 
   const scheduleMutation = useMutation({
-    mutationFn: scheduleAsset,
+    mutationFn: (asset: Asset) => {
+      const input: SchedulePostInput = {
+        campaignId: asset.campaignId,
+        assetId: asset.id,
+        channel: asset.channel,
+        date: new Date().toISOString().split("T")[0],
+        time: "09:00",
+      };
+      return scheduleAsset(input);
+    },
     onSuccess: () => { addToast("success", "Post scheduled"); void queryClient.invalidateQueries({ queryKey: ["scheduled-posts"] }); },
   });
 
@@ -102,9 +111,17 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
 type AssetActions = { asset: Asset; onDelete: () => void; onSchedule: () => void; onDownload: () => void; busy: boolean };
 
 function GridAssetCard({ asset, onDelete, onSchedule, onDownload, busy }: AssetActions) {
+  const isImage = asset.kind === "image" && (asset.preview?.startsWith("http") || asset.preview?.startsWith("data:"));
   return (
     <Card className="group relative overflow-hidden">
-      <div className={cn("h-40 w-full", asset.preview)} />
+      {isImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={asset.preview} alt={asset.title} className="h-40 w-full object-cover" />
+      ) : (
+        <div className="flex h-40 w-full items-center justify-center bg-surface-muted">
+          <ImageIcon className="h-8 w-8 text-text-muted" />
+        </div>
+      )}
       <div className="absolute inset-0 bg-black/0 transition group-hover:bg-black/40" />
       <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 p-3 opacity-0 transition group-hover:opacity-100">
         <IconBtn label="Download" onClick={onDownload} disabled={busy}><Download className="h-4 w-4" /></IconBtn>
@@ -125,10 +142,18 @@ function GridAssetCard({ asset, onDelete, onSchedule, onDownload, busy }: AssetA
 }
 
 function ListAssetRow({ asset, onDelete, onSchedule, onDownload, busy }: AssetActions) {
+  const isImage = asset.kind === "image" && (asset.preview?.startsWith("http") || asset.preview?.startsWith("data:"));
   return (
     <div className="flex flex-col gap-3 rounded-card border bg-surface/88 p-3 transition hover:bg-surface-elevated sm:flex-row sm:items-center">
       <div className="flex items-center gap-3">
-        <div className={cn("h-14 w-14 shrink-0 rounded-control", asset.preview)} />
+        {isImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={asset.preview} alt={asset.title} className="h-14 w-14 shrink-0 rounded-control object-cover" />
+        ) : (
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-control bg-surface-muted">
+            <ImageIcon className="h-5 w-5 text-text-muted" />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-text-primary">{asset.title}</p>
           <p className="line-clamp-1 text-xs text-text-muted">{asset.prompt}</p>

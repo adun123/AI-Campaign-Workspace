@@ -51,7 +51,7 @@ export function useScheduledPostsQuery() {
 export function useActiveBrandKitQuery(workspaceId?: string) {
   return useQuery({
     queryKey: ["brand-kit", workspaceId],
-    queryFn: () => getActiveBrandKit(workspaceId),
+    queryFn: () => getActiveBrandKit(),
   });
 }
 
