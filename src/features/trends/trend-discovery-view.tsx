@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, Rocket, Sparkles, TrendingUp } from "lucide-react";
+import { Copy, Flame, Rocket, Share2, Sparkles, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -41,8 +41,14 @@ export function TrendDiscoveryView() {
 
   function handleUseAsBrief(trend: Trend) {
     pinTrend(trend);
-    addToast("success", "Trend pinned as brief — go to Workspace");
-    router.push("/workspace");
+    addToast("success", "Trend pinned — use quick actions in Workspace to generate content");
+    router.push("/workspace?from=trends");
+  }
+
+  function handleCopyHashtags(trend: Trend) {
+    const hashtags = trend.hashtags.join(" ");
+    navigator.clipboard.writeText(hashtags);
+    addToast("success", "Hashtags copied to clipboard");
   }
 
   return (
@@ -94,22 +100,44 @@ export function TrendDiscoveryView() {
             const config = levelConfig[trend.level];
             const Icon = config.icon;
             return (
-              <Card key={trend.id} className="flex flex-col">
+              <Card key={trend.id} className="flex flex-col transition-all hover:shadow-lg">
                 <CardContent className="flex flex-1 flex-col p-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <Badge tone="primary">{trend.platform}</Badge>
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <Badge tone="primary">{trend.platform}</Badge>
+                      <Badge tone="neutral">{trend.niche}</Badge>
+                    </div>
                     <Badge tone={config.tone}><Icon className="mr-1 h-3 w-3" />{config.label}</Badge>
                   </div>
-                  <h3 className="mt-3 flex-1 text-sm font-semibold leading-6 text-text-primary">{trend.title}</h3>
-                  <Badge tone="neutral" className="mt-2 w-fit">{trend.niche}</Badge>
-                  <div className="mt-3 flex flex-wrap gap-1.5">
+                  <h3 className="mb-3 flex-1 text-base font-semibold leading-6 text-text-primary">
+                    {trend.title}
+                  </h3>
+                  <div className="mb-4 flex flex-wrap gap-1.5">
                     {trend.hashtags.map((tag) => (
-                      <span key={tag} className="rounded-full bg-accent/10 px-2 py-0.5 text-xs text-accent">{tag}</span>
+                      <span key={tag} className="rounded-full bg-accent/10 px-2.5 py-0.5 text-xs font-medium text-accent">
+                        {tag}
+                      </span>
                     ))}
                   </div>
-                  <Button className="mt-4 w-full" variant="secondary" size="sm" onClick={() => handleUseAsBrief(trend)}>
-                    Use as Brief
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      className="flex-1" 
+                      variant="secondary" 
+                      size="sm" 
+                      onClick={() => handleUseAsBrief(trend)}
+                    >
+                      <Share2 className="mr-1.5 h-3.5 w-3.5" />
+                      Use as Brief
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleCopyHashtags(trend)}
+                      title="Copy hashtags"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             );
