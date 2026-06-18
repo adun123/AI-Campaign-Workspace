@@ -3,6 +3,7 @@
 import { MessageSquarePlus, Settings2, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { useChatStore } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
 import type { Campaign } from "@/types/domain";
@@ -69,7 +70,7 @@ function SettingsPopup({ campaign }: { campaign: Campaign }) {
               <EditableField label="Tone" value={tone} onChange={setTone} suggestions={toneSuggestions} />
               <div className="space-y-1.5">
                 <label className="text-xs uppercase tracking-wider text-text-muted">Launch Date</label>
-                <input type="date" value={launchDate} onChange={(e) => setLaunchDate(e.target.value)} className="h-9 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" />
+                <DatePicker value={launchDate} onChange={setLaunchDate} placeholder="Select launch date" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs uppercase tracking-wider text-text-muted">Channels</label>

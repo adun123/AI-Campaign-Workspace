@@ -1,16 +1,17 @@
 "use client";
 
-import { Brush, Eraser, X } from "lucide-react";
+import { Brush, Eraser, Loader2, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useToastStore } from "@/stores/toast-store";
 import type { Asset } from "@/types/domain";
 
-export function ImageEditModal({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+export function ImageEditModal({ asset, onClose, onEditComplete }: { asset: Asset; onClose: () => void; onEditComplete?: (instruction: string, newAsset: Asset) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const [instruction, setInstruction] = useState("");
   const [hasMask, setHasMask] = useState(false);
+  const [loading, setLoading] = useState(false);
   const addToast = useToastStore((s) => s.addToast);
 
   function getPos(e: React.PointerEvent<HTMLCanvasElement>) {
@@ -52,9 +53,33 @@ export function ImageEditModal({ asset, onClose }: { asset: Asset; onClose: () =
     setHasMask(false);
   }
 
-  function applyEdit() {
-    addToast("success", `Edit applied: ${instruction || "masked area regenerated"}`);
-    onClose();
+  async function applyEdit() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/generate/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          asset_id: asset.id,
+          campaign_id: asset.campaignId,
+          source_image: asset.preview,
+          instruction: instruction || "Regenerate the masked area",
+          mask: canvasRef.current?.toDataURL("image/png"),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Edit failed");
+      }
+      const data = await res.json();
+      addToast("success", "Edit generated!");
+      onEditComplete?.(instruction || "Regenerate the masked area", data.asset);
+      onClose();
+    } catch (err: unknown) {
+      addToast("error", err instanceof Error ? err.message : "Edit failed");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -70,8 +95,8 @@ export function ImageEditModal({ asset, onClose }: { asset: Asset; onClose: () =
           </button>
         </div>
 
-        <div className="relative mt-4 h-72 w-full overflow-hidden rounded-card">
-          <div className={`absolute inset-0 ${asset.preview}`} />
+        <div className="relative mt-4 h-72 w-full overflow-hidden rounded-card border">
+          <img src={asset.preview} alt={asset.title ?? "Source"} className="absolute inset-0 h-full w-full object-contain" />
           <canvas
             ref={canvasRef}
             width={560}
@@ -98,7 +123,9 @@ export function ImageEditModal({ asset, onClose }: { asset: Asset; onClose: () =
 
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={applyEdit} disabled={!hasMask}>Apply Edit</Button>
+          <Button size="sm" onClick={applyEdit} disabled={!hasMask || loading}>
+            {loading ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Generating...</> : "Apply Edit"}
+          </Button>
         </div>
       </div>
     </div>

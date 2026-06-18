@@ -1,25 +1,38 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, ChevronUp, ImagePlus, Send, Sparkles, Trash2, User, WandSparkles, X } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, ImagePlus, Plus, Send, Sparkles, Trash2, User, WandSparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { WorkspaceAssetCard } from "@/features/campaigns/workspace-asset-card";
 import { WorkspaceHeaderActions } from "@/features/campaigns/workspace-settings-popup";
-import { useActiveCampaignQuery, useGenerationsQuery } from "@/hooks/use-workspace-data";
+import { useActiveCampaignQuery, useCampaignByIdQuery, useGenerationsQuery } from "@/hooks/use-workspace-data";
 import { generateAssets, deleteGeneration } from "@/services/ai.service";
 import { saveAsset } from "@/services/asset.service";
 import { scheduleAsset } from "@/services/scheduler.service";
+import { createCampaign } from "@/services/campaign.service";
 import { useChatStore, aiModels, type ChatMessage } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useTrendBriefStore } from "@/stores/trend-brief-store";
-import type { Asset, AIGeneration, GenerationMode } from "@/types/domain";
+import type { Asset, AIGeneration, CampaignChannel, GenerationMode } from "@/types/domain";
 
-export function CampaignWorkspace() {
+function fileToDataURI(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) {
   const queryClient = useQueryClient();
-  const campaignQuery = useActiveCampaignQuery();
+  const campaignByIdQuery = useCampaignByIdQuery(campaignId);
+  const activeCampaignQuery = useActiveCampaignQuery();
+  const campaignQuery = campaignId ? campaignByIdQuery : activeCampaignQuery;
   const campaign = campaignQuery.data;
   const generationsQuery = useGenerationsQuery(campaign?.id);
   const history = useMemo(() => generationsQuery.data ?? [], [generationsQuery.data]);
@@ -27,6 +40,7 @@ export function CampaignWorkspace() {
   const messages = useChatStore((s) => s.messages);
   const addMessage = useChatStore((s) => s.addMessage);
   const loadHistory = useChatStore((s) => s.loadHistory);
+  const setCampaign = useChatStore((s) => s.setCampaign);
   const mode = useChatStore((s) => s.mode);
   const setMode = useChatStore((s) => s.setMode);
   const model = useChatStore((s) => s.model);
@@ -35,6 +49,7 @@ export function CampaignWorkspace() {
   const addImages = useChatStore((s) => s.addImages);
   const removeImage = useChatStore((s) => s.removeImage);
   const clearImages = useChatStore((s) => s.clearImages);
+  const aspectRatio = useChatStore((s) => s.aspectRatio);
 
   const addToast = useToastStore((s) => s.addToast);
   const pinnedTrend = useTrendBriefStore((s) => s.pinnedTrend);
@@ -45,14 +60,25 @@ export function CampaignWorkspace() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Set active campaign in chat store when campaign changes
+  useEffect(() => {
+    if (campaign?.id) {
+      setCampaign(campaign.id);
+    }
+  }, [campaign?.id, setCampaign]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const generateMutation = useMutation({
-    mutationFn: (prompt: string) => {
+    mutationFn: async (prompt: string) => {
       if (!campaign) throw new Error("Campaign not loaded");
-      return generateAssets({ campaignId: campaign.id, mode, prompt });
+      let images: string[] | undefined;
+      if (mode === "image-to-image" && attachedImages.length > 0) {
+        images = await Promise.all(attachedImages.map((img) => fileToDataURI(img.file)));
+      }
+      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio });
     },
     onSuccess: (generation) => {
       addMessage({ role: "ai", content: "Here are the generated assets:", assets: generation.outputAssets });
@@ -66,15 +92,15 @@ export function CampaignWorkspace() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: saveAsset,
+    mutationFn: (asset: Asset) => saveAsset({ campaignId: asset.campaignId, title: asset.title, kind: asset.kind, prompt: asset.prompt, preview: asset.preview, channel: asset.channel, status: "saved" }),
     onSuccess: () => {
-      addToast("success", "Asset saved");
+      addToast("success", "Asset saved to library");
       void queryClient.invalidateQueries({ queryKey: ["assets", campaign?.id] });
     },
   });
 
   const scheduleMutation = useMutation({
-    mutationFn: scheduleAsset,
+    mutationFn: (asset: Asset) => scheduleAsset({ campaignId: asset.campaignId, assetId: asset.id, channel: asset.channel, date: new Date().toISOString().split("T")[0], time: "09:00" }),
     onSuccess: () => {
       addToast("success", "Post scheduled");
       void queryClient.invalidateQueries({ queryKey: ["scheduled-posts"] });
@@ -114,15 +140,22 @@ export function CampaignWorkspace() {
   function handleHistoryClick(genId: string) {
     const gen = history.find((g) => g.id === genId);
     if (!gen) return;
-    const msgs: ChatMessage[] = [
-      { id: `hist_user_${gen.id}`, role: "user", content: gen.prompt, timestamp: gen.createdAt },
-      { id: `hist_ai_${gen.id}`, role: "ai", content: gen.status === "completed" ? "Here are the results:" : "Generation was not completed.", assets: gen.outputAssets, timestamp: gen.completedAt ?? gen.createdAt },
-    ];
-    loadHistory(msgs);
+    addMessage({ role: "user", content: `📂 ${gen.prompt}` });
+    addMessage({ role: "ai", content: gen.status === "completed" ? "Here are the results from history:" : "This generation was not completed.", assets: gen.outputAssets });
+  }
+
+  function handleEditComplete(instruction: string, newAsset: Asset) {
+    addMessage({ role: "user", content: `✏️ Edit: ${instruction}` });
+    addMessage({ role: "ai", content: "Here's the edited image:", assets: [newAsset] });
+    void queryClient.invalidateQueries({ queryKey: ["generations", campaign?.id] });
+  }
+
+  if (campaignQuery.isLoading) {
+    return <Card className="p-6 text-sm text-text-muted">Loading campaign workspace...</Card>;
   }
 
   if (!campaign) {
-    return <Card className="p-6 text-sm text-text-muted">Loading campaign workspace...</Card>;
+    return <CreateCampaignCard />;
   }
 
   return (
@@ -162,7 +195,7 @@ export function CampaignWorkspace() {
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="space-y-4 pb-4">
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} onSave={(a) => saveMutation.mutate(a)} onSchedule={(a) => scheduleMutation.mutate(a)} busy={saveMutation.isPending || scheduleMutation.isPending} />
+            <MessageBubble key={msg.id} message={msg} onSave={(a) => saveMutation.mutate(a)} onSchedule={(a) => scheduleMutation.mutate(a)} onEditComplete={handleEditComplete} busy={saveMutation.isPending || scheduleMutation.isPending} />
           ))}
           <div ref={chatEndRef} />
         </div>
@@ -203,6 +236,9 @@ export function CampaignWorkspace() {
                 </button>
               </>
             )}
+
+            {/* Aspect ratio selector */}
+            <AspectRatioSelector />
 
             {/* Separator */}
             <div className="mx-1 h-5 w-px bg-border" />
@@ -252,7 +288,7 @@ export function CampaignWorkspace() {
   );
 }
 
-function MessageBubble({ message, onSave, onSchedule, busy }: { message: ChatMessage; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; busy: boolean }) {
+function MessageBubble({ message, onSave, onSchedule, onEditComplete, busy }: { message: ChatMessage; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void; busy: boolean }) {
   const isUser = message.role === "user";
 
   return (
@@ -270,7 +306,7 @@ function MessageBubble({ message, onSave, onSchedule, busy }: { message: ChatMes
           <div className="flex gap-3 overflow-x-auto">
             {message.assets.map((asset) => (
               <div key={asset.id} className="shrink-0">
-                <WorkspaceAssetCard asset={asset} onSave={onSave} onSchedule={onSchedule} busy={busy} />
+                <WorkspaceAssetCard asset={asset} onSave={onSave} onSchedule={onSchedule} onEditComplete={onEditComplete} busy={busy} />
               </div>
             ))}
           </div>
@@ -296,20 +332,200 @@ function ExpandableHistory({ history, onSelect, onDelete }: { history: AIGenerat
       </button>
       {open && (
         <div className="grid grid-cols-2 gap-2 border-t p-3 sm:grid-cols-3 lg:grid-cols-4">
-          {history.map((gen) => (
-            <div key={gen.id} className="group relative rounded-control border bg-surface-muted p-2.5 transition hover:bg-surface-elevated">
-              <button type="button" onClick={() => { onSelect(gen.id); setOpen(false); }} className="w-full text-left">
-                <div className={`mb-2 h-12 w-full rounded-control ${gen.outputAssets[0]?.preview ?? "bg-surface-elevated"}`} />
-                <p className="line-clamp-2 text-xs font-medium leading-4 text-text-primary">{gen.prompt}</p>
-                <p className="mt-1 text-xs text-text-muted">{gen.outputAssets.length} assets</p>
-              </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(gen.id); }} aria-label="Delete" className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-error group-hover:opacity-100">
-                <Trash2 className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
+          {history.map((gen) => {
+            const outputAssets = gen.outputAssets ?? [];
+            const firstPreview = outputAssets[0]?.preview;
+            const isImageUrl = firstPreview?.startsWith("http") || firstPreview?.startsWith("data:");
+
+            return (
+              <div key={gen.id} className="group relative rounded-control border bg-surface-muted p-2.5 transition hover:bg-surface-elevated">
+                <button type="button" onClick={() => { onSelect(gen.id); setOpen(false); }} className="w-full text-left">
+                  {isImageUrl ? (
+                    <div className="mb-2 h-12 w-full overflow-hidden rounded-control">
+                      <img src={firstPreview} alt="" className="h-full w-full object-cover" />
+                    </div>
+                  ) : (
+                    <div className="mb-2 h-12 w-full rounded-control bg-surface-elevated" />
+                  )}
+                  <p className="line-clamp-2 text-xs font-medium leading-4 text-text-primary">{gen.prompt}</p>
+                  <p className="mt-1 text-xs text-text-muted">{outputAssets.length} assets</p>
+                </button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(gen.id); }} aria-label="Delete" className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 text-white opacity-0 transition hover:bg-error group-hover:opacity-100">
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
+}
+
+const ASPECT_RATIOS = [
+  { id: "1:1", label: "1:1", desc: "Feed Square" },
+  { id: "4:5", label: "4:5", desc: "Feed Portrait" },
+  { id: "9:16", label: "9:16", desc: "Story/Reels" },
+  { id: "16:9", label: "16:9", desc: "Landscape" },
+];
+
+function AspectRatioSelector() {
+  const [open, setOpen] = useState(false);
+  const aspectRatio = useChatStore((s) => s.aspectRatio);
+  const setAspectRatio = useChatStore((s) => s.setAspectRatio);
+  const current = ASPECT_RATIOS.find((a) => a.id === aspectRatio) ?? ASPECT_RATIOS[0];
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(!open)} title={`Size: ${current.desc}`} className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary">
+        <span className="inline-block h-4 w-3 rounded-sm border border-current" style={{ aspectRatio: current.id.replace(":", "/") }} />
+        <span>{current.label}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-50 mb-2 w-36 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
+            {ASPECT_RATIOS.map((ar) => (
+              <button key={ar.id} type="button" onClick={() => { setAspectRatio(ar.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-control px-3 py-2 text-xs transition ${aspectRatio === ar.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"}`}>
+                <span className="inline-block h-4 w-3 rounded-sm border border-current" style={{ aspectRatio: ar.id.replace(":", "/") }} />
+                <span>{ar.desc}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CreateCampaignCard() {
+  const queryClient = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
+  const [name, setName] = useState("");
+  const [objective, setObjective] = useState("");
+  const [audience, setAudience] = useState("");
+  const [tone, setTone] = useState("");
+  const [channels, setChannels] = useState<CampaignChannel[]>([]);
+  const [launchDate, setLaunchDate] = useState("");
+
+  const createMutation = useMutation({
+    mutationFn: createCampaign,
+    onSuccess: () => {
+      addToast("success", "Campaign created!");
+      void queryClient.invalidateQueries({ queryKey: ["active-campaign"] });
+    },
+    onError: () => {
+      addToast("error", "Failed to create campaign");
+    },
+  });
+
+  const allChannels: CampaignChannel[] = ["Instagram", "LinkedIn", "TikTok", "Email"];
+
+  function toggleChannel(ch: CampaignChannel) {
+    setChannels((prev) => (prev.includes(ch) ? prev.filter((c) => c !== ch) : [...prev, ch]));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      addToast("error", "Campaign name is required");
+      return;
+    }
+    createMutation.mutate({
+      name: name.trim(),
+      objective,
+      audience,
+      tone,
+      channels,
+      launchDate,
+      status: "draft",
+    });
+  }
+
+  return (
+    <div className="flex min-h-[calc(100vh-7rem)] items-center justify-center">
+      <Card className="w-full max-w-lg p-6">
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/15">
+            <Plus className="h-6 w-6 text-primary-soft" />
+          </div>
+          <h2 className="text-lg font-semibold text-text-primary">Create Your First Campaign</h2>
+          <p className="mt-1 text-sm text-text-muted">Set up a campaign to start generating AI content</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-text-muted">Campaign Name *</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Summer Sale 2026"
+              className="h-9 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-text-muted">Objective</label>
+            <input
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              placeholder="Drive brand awareness and sales"
+              className="h-9 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs uppercase tracking-wider text-text-muted">Target Audience</label>
+              <input
+                value={audience}
+                onChange={(e) => setAudience(e.target.value)}
+                placeholder="Gen-Z creators"
+                className="h-9 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs uppercase tracking-wider text-text-muted">Tone</label>
+              <input
+                value={tone}
+                onChange={(e) => setTone(e.target.value)}
+                placeholder="Bold, energetic"
+                className="h-9 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-text-muted">Channels</label>
+            <div className="flex flex-wrap gap-2">
+              {allChannels.map((ch) => (
+                <button
+                  key={ch}
+                  type="button"
+                  onClick={() => toggleChannel(ch)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                    channels.includes(ch)
+                      ? "bg-primary/15 text-primary-soft"
+                      : "bg-surface-muted text-text-muted hover:bg-surface-elevated"
+                  }`}
+                >
+                  {ch}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs uppercase tracking-wider text-text-muted">Launch Date</label>
+            <DatePicker value={launchDate} onChange={setLaunchDate} placeholder="Select launch date" />
+          </div>
+
+          <Button type="submit" className="w-full" size="sm" disabled={createMutation.isPending}>
+            {createMutation.isPending ? "Creating..." : "Create Campaign"}
+          </Button>
+        </form>
+      </Card>
     </div>
   );
 }
