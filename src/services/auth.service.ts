@@ -1,10 +1,9 @@
-import { currentUser, currentWorkspace } from "@/lib/mock-data";
-import { waitForMock } from "@/services/mock-runtime";
-
 export async function getSession() {
-  await waitForMock(160);
-  return {
-    user: currentUser,
-    workspace: currentWorkspace,
-  };
+  const res = await fetch("/api/auth/session");
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" });
 }
