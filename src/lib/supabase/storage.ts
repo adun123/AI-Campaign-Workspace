@@ -49,7 +49,15 @@ export async function uploadToStorage(
   // Ensure bucket exists (auto-create if needed)
   await ensureBucketExists();
 
-  console.log(`[Storage] Uploading to bucket: ${BUCKET_ID}, path: ${path}, contentType: ${contentType}, size: ${Buffer.from(data).length} bytes`);
+  // Calculate size for logging
+  let sizeInfo = "unknown";
+  if (data instanceof Blob) {
+    sizeInfo = `${data.size} bytes`;
+  } else if (data instanceof Uint8Array) {
+    sizeInfo = `${data.length} bytes`;
+  }
+
+  console.log(`[Storage] Uploading to bucket: ${BUCKET_ID}, path: ${path}, contentType: ${contentType}, size: ${sizeInfo}`);
 
   const { error } = await supabase.storage
     .from(BUCKET_ID)
