@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, ImageIcon, LayoutDashboard, LayoutGrid, LogOut, Palette, Settings, Sparkles, TrendingUp, WandSparkles } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { CalendarDays, ChevronLeft, ChevronRight, FolderOpen, ImageIcon, LayoutDashboard, LayoutGrid, LogOut, Palette, Settings, Sparkles, TrendingUp, WandSparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui-store";
+import { logout } from "@/services/auth.service";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/campaigns", label: "Campaigns", icon: FolderOpen },
   { href: "/workspace", label: "Campaign Workspace", icon: Sparkles },
   { href: "/trends", label: "Trend Discovery", icon: TrendingUp },
   { href: "/content-studio", label: "Templates", icon: WandSparkles },
@@ -21,8 +23,15 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+
+  async function handleLogout() {
+    await logout();
+    router.push("/auth/login");
+    router.refresh();
+  }
 
   return (
     <aside className={cn("hidden border-r bg-surface/82 backdrop-blur-xl transition-all duration-300 lg:flex lg:min-h-screen lg:flex-col", sidebarCollapsed ? "lg:w-20" : "lg:w-[var(--sidebar-width)]")}>
@@ -52,9 +61,9 @@ export function Sidebar() {
       </nav>
       {!sidebarCollapsed ? (
         <div className="space-y-2 p-4">
-          <Link href="/" className="flex w-full items-center gap-3 rounded-control px-3 py-2.5 text-sm text-text-muted transition hover:bg-error/10 hover:text-error">
+        <button onClick={handleLogout} className="flex w-full items-center gap-3 rounded-control px-3 py-2.5 text-sm text-text-muted transition hover:bg-error/10 hover:text-error">
             <LogOut className="h-4 w-4" /> Logout
-          </Link>
+          </button>
           <div className="rounded-card border bg-surface-muted p-4">
             <Badge tone="accent">Studio plan</Badge>
             <p className="mt-3 text-sm font-medium text-text-primary">Backend-ready mocks</p>
@@ -63,9 +72,9 @@ export function Sidebar() {
         </div>
       ) : (
         <div className="p-3">
-          <Link href="/" className="flex w-full items-center justify-center rounded-control px-3 py-2.5 text-text-muted transition hover:bg-error/10 hover:text-error" title="Logout" aria-label="Logout">
+          <button onClick={handleLogout} className="flex w-full items-center justify-center rounded-control px-3 py-2.5 text-text-muted transition hover:bg-error/10 hover:text-error" title="Logout" aria-label="Logout">
             <LogOut className="h-4 w-4" />
-          </Link>
+          </button>
         </div>
       )}
     </aside>

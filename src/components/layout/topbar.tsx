@@ -21,10 +21,12 @@ export function Topbar() {
         </div>
         <Button variant="ghost" size="sm"><Bell className="h-4 w-4" /></Button>
         <div className="flex items-center gap-3 rounded-full border bg-surface px-2 py-1.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">{user?.avatarInitials ?? "AI"}</div>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
+            {sessionQuery.data?.profile?.full_name?.[0]?.toUpperCase() ?? "K"}
+          </div>
           <div className="hidden pr-2 sm:block">
-            <p className="text-xs font-medium text-text-primary">{user?.name ?? "Loading"}</p>
-            <p className="text-xs text-text-muted">{sessionQuery.data?.workspace.name ?? "Workspace"}</p>
+            <p className="text-xs font-medium text-text-primary">{sessionQuery.data?.profile?.full_name ?? "Loading..."}</p>
+            <p className="text-xs text-text-muted">{sessionQuery.data?.workspace?.name ?? "Workspace"}</p>
           </div>
         </div>
       </div>
