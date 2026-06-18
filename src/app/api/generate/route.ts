@@ -1,7 +1,71 @@
 import { createClient } from "@/lib/supabase/server";
 import { getWorkspaceId } from "@/lib/get-workspace-id";
+import { persistRemoteImage } from "@/lib/supabase/storage";
 import googleAI from "@/lib/google-ai";
+import fal from "@/lib/fal-ai";
 import { NextResponse } from "next/server";
+
+// Extend API route timeout for long-running AI generation
+export const maxDuration = 300; // 5 minutes for Vercel/serverless
+
+// Persist a generated image URL to Supabase Storage and return the permanent URL
+async function persistGeneratedImage(tempUrl: string, campaignId: string, generationId: string): Promise<string> {
+  if (!tempUrl) return tempUrl;
+  try {
+    const storagePath = `${campaignId}/${generationId}_${Date.now()}.png`;
+    const permanentUrl = await persistRemoteImage(tempUrl, storagePath);
+    console.log(`[Storage] Persisted image: ${storagePath}`);
+    return permanentUrl;
+  } catch (err) {
+    console.error("[Storage] Failed to persist image:", err);
+    return tempUrl; // fallback to temp URL
+  }
+}
+
+function localEnhance(prompt: string, channel: string): string {
+  const baseEnhancements = [
+    "professional photography",
+    "soft natural lighting",
+    "clean composition",
+    "vibrant colors",
+    "high detail",
+    "sharp focus",
+  ];
+
+  const channelBoost: Record<string, string[]> = {
+    Instagram: ["vertical composition", "aesthetic mood", "warm tones", "Instagram-ready"],
+    LinkedIn: ["professional setting", "clean modern style", "corporate feel"],
+    TikTok: ["dynamic composition", "bold visuals", "eye-catching", "trendy"],
+    Email: ["clear focal point", "inviting mood", "clean background"],
+  };
+
+  const extra = channelBoost[channel] ?? channelBoost.Instagram;
+  return `${prompt}, ${[...baseEnhancements, ...extra].join(", ")}`;
+}
+
+async function enhancePrompt(prompt: string, brandContext: string, channel: string): Promise<string> {
+  try {
+    const response = await googleAI.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `Short prompt: "${prompt}"`,
+      config: {
+        systemInstruction: [
+          "You are a prompt engineer for AI image generation (Flux model).",
+          "Convert short or vague descriptions into detailed, visually rich prompts.",
+          "Include: lighting, composition, style, color palette, mood, camera angle, and quality keywords.",
+          brandContext ? `Brand context: ${brandContext}` : "",
+          channel ? `Optimize for ${channel} visual format.` : "",
+          "Output ONLY the enhanced prompt, nothing else. Keep it under 200 words.",
+          "Use English only for the output prompt.",
+        ].filter(Boolean).join(" "),
+      },
+    });
+    return response.text?.trim() || prompt;
+  } catch (err) {
+    console.error("AI prompt enhancement failed, using local template:", err);
+    return localEnhance(prompt, channel);
+  }
+}
 
 export async function GET(request: Request) {
   const workspaceId = await getWorkspaceId();
@@ -57,66 +121,149 @@ export async function POST(request: Request) {
         ? `Style: ${brandKit.voice ?? "professional"}. Colors: ${brandKit.colors?.join(", ") ?? "brand colors"}. ${brandKit.guardrails?.length ? `Avoid: ${brandKit.guardrails.join(", ")}.` : ""}`
         : "";
 
-      const arText = aspect_ratio ? `Aspect ratio: ${aspect_ratio}.` : "";
-      const fullPrompt = `${prompt}. ${brandContext} ${arText} High quality, ${channel ?? "social media"} format, marketing visual.`;
+      // Enhance prompt dengan Gemini (gratis) untuk hasil image generation yang lebih baik
+      console.log("[Enhance] Original prompt:", prompt);
+      const enhancedPrompt = await enhancePrompt(prompt, brandContext, channel ?? "social media");
+      console.log("[Enhance] Enhanced prompt:", enhancedPrompt);
 
-      const response = await googleAI.models.generateContent({
-        model: "gemini-3.1-flash-image",
-        contents: fullPrompt,
-        config: { responseModalities: ["TEXT", "IMAGE"] },
+      const fullPrompt = `${enhancedPrompt}. ${brandContext} High quality, ${channel ?? "social media"} format, marketing visual.`;
+
+      // Map aspect_ratio to fal.ai image_size
+      const sizeMap = {
+        "1:1": "square_hd",
+        "16:9": "landscape_16_9",
+        "9:16": "portrait_16_9",
+        "4:3": "landscape_4_3",
+        "3:4": "portrait_4_3",
+      } as const;
+      const imageSize = sizeMap[aspect_ratio as keyof typeof sizeMap] ?? "square_hd";
+
+      const result = await fal.subscribe("fal-ai/flux/schnell", {
+        input: {
+          prompt: fullPrompt,
+          image_size: imageSize,
+          num_images: 1,
+          num_inference_steps: 4,
+        },
       });
 
-      let imageUrl = "";
-      const parts = response.candidates?.[0]?.content?.parts ?? [];
-      // Skip thought parts, find actual output image
-      const imagePart = parts.find((p: Record<string, unknown>) => 
-        !p.thought && (p as { inlineData?: { mimeType?: string } }).inlineData?.mimeType?.startsWith("image/")
-      ) as { inlineData?: { mimeType?: string; data?: string } } | undefined;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tempImageUrl = (result.data as any).images?.[0]?.url ?? "";
 
-      if (imagePart?.inlineData?.data) {
-        imageUrl = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-      } else {
-        // Fallback: check text response
-        const textPart = parts.find((p: Record<string, unknown>) => !p.thought && (p as { text?: string }).text);
-        console.log("No image in response. Parts count:", parts.length, "Text:", (textPart as { text?: string })?.text?.slice(0, 100));
-      }
+      // Persist generated image to Supabase Storage
+      const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, generation.id);
 
-      outputAssets = [{ title: "Generated Image", kind: "image", preview: imageUrl, prompt }];
+      outputAssets = [{ title: "Generated Image", kind: "image", preview: imageUrl, prompt: enhancedPrompt }];
 
     } else if (mode === "image-to-image") {
       if (!images || images.length === 0) {
-        return NextResponse.json({ error: "images wajib disertakan untuk mode image-to-image." }, { status: 400 });
+        return NextResponse.json({ error: "Images must be provided for image-to-image mode." }, { status: 400 });
       }
 
-      // Use first image as source
-      const base64Match = images[0].match(/^data:(image\/\w+);base64,(.+)$/);
-      if (!base64Match) {
-        return NextResponse.json({ error: "Invalid image format" }, { status: 400 });
+      if (images.length > 5) {
+        return NextResponse.json({ error: "Maximum 5 images allowed for image-to-image generation." }, { status: 400 });
       }
 
-      const response = await googleAI.models.generateContent({
-        model: "gemini-3.1-flash-image",
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { inlineData: { mimeType: base64Match[1], data: base64Match[2] } },
-              { text: `${prompt}. ${aspect_ratio ? `Aspect ratio: ${aspect_ratio}.` : ""} High quality, ${channel ?? "social media"} format, marketing visual.` },
-            ],
-          },
-        ],
-        config: { responseModalities: ["TEXT", "IMAGE"] },
-      });
-
-      let imageUrl = "";
-      const parts = response.candidates?.[0]?.content?.parts ?? [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const imagePart = parts.find((p: any) => !p.thought && p.inlineData?.mimeType?.startsWith("image/")) as { inlineData?: { mimeType?: string; data?: string } } | undefined;
-      if (imagePart?.inlineData?.data) {
-        imageUrl = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
+      // Validate all images
+      const validImages = images.filter((img: string) => 
+        typeof img === "string" && (img.startsWith("data:image/") || img.startsWith("http"))
+      );
+      if (validImages.length === 0) {
+        return NextResponse.json({ error: "No valid images provided. Use data URI or URL format." }, { status: 400 });
       }
 
-      outputAssets = [{ title: "Transformed Image", kind: "image", preview: imageUrl, prompt }];
+      console.log(`[Image-to-Image] Processing ${validImages.length} image(s)`);
+
+      // Map aspect_ratio to fal.ai supported values for kontext endpoints
+      // Supported: 21:9, 16:9, 4:3, 3:2, 1:1, 2:3, 3:4, 9:16, 9:21
+      type KontextAspect = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "2:3" | "3:2" | "21:9" | "9:21";
+      const kontextAspectMap: Record<string, KontextAspect> = {
+        "1:1": "1:1",
+        "4:5": "3:4",   // 4:5 not supported, closest is 3:4
+        "9:16": "9:16",
+        "16:9": "16:9",
+        "4:3": "4:3",
+        "3:2": "3:2",
+      };
+      const mappedAspect: KontextAspect | undefined = aspect_ratio ? (kontextAspectMap[aspect_ratio] ?? "1:1") : undefined;
+
+      // Upload base64 images to fal.ai storage to avoid oversized payloads
+      const uploadedUrls: string[] = [];
+      for (let i = 0; i < validImages.length; i++) {
+        const img = validImages[i];
+        try {
+          if (img.startsWith("data:image/")) {
+            const mimeMatch = img.match(/^data:(image\/\w+);base64,/);
+            const mime = mimeMatch?.[1] ?? "image/png";
+            const ext = mime.split("/")[1] ?? "png";
+            const base64Data = img.replace(/^data:image\/\w+;base64,/, "");
+            const buffer = Buffer.from(base64Data, "base64");
+            const blob = new Blob([buffer], { type: mime });
+            const file = new File([blob], `upload_${i}.${ext}`, { type: mime });
+            const url = await fal.storage.upload(file);
+            uploadedUrls.push(url);
+            console.log(`[Image-to-Image] Uploaded image ${i + 1}/${validImages.length} to fal storage`);
+          } else {
+            uploadedUrls.push(img);
+            console.log(`[Image-to-Image] Using existing URL for image ${i + 1}/${validImages.length}`);
+          }
+        } catch (uploadErr) {
+          console.error(`[Image-to-Image] Failed to upload image ${i + 1}:`, uploadErr);
+          throw new Error(`Failed to upload image ${i + 1}: ${uploadErr instanceof Error ? uploadErr.message : "Unknown error"}`);
+        }
+      }
+
+      console.log(`[Image-to-Image] Uploaded ${uploadedUrls.length} image(s) to fal storage`);
+
+      let tempImageUrl = "";
+
+      try {
+        console.log(`[Image-to-Image] Calling fal.ai with ${uploadedUrls.length > 1 ? "kontext/multi" : "kontext"}...`);
+        
+        if (uploadedUrls.length === 1) {
+          // Single image: use standard kontext endpoint
+          const result = await fal.subscribe("fal-ai/flux-pro/kontext", {
+            input: {
+              prompt: `${prompt}. Preserve the original image structure and composition. High quality, ${channel ?? "social media"} format.`,
+              image_url: uploadedUrls[0],
+              aspect_ratio: mappedAspect,
+              num_images: 1,
+            },
+          });
+          console.log("[Image-to-Image] Single image result:", result);
+          tempImageUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
+        } else {
+          // Multiple images: use multi-image kontext endpoint
+          const result = await fal.subscribe("fal-ai/flux-pro/kontext/multi", {
+            input: {
+              prompt: `${prompt}. Combine and blend these images into a single cohesive composition. High quality, ${channel ?? "social media"} format.`,
+              image_urls: uploadedUrls,
+              aspect_ratio: mappedAspect,
+              num_images: 1,
+            },
+          });
+          console.log("[Image-to-Image] Multi image result:", result);
+          tempImageUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
+        }
+      } catch (falErr) {
+        console.error("[Image-to-Image] fal.ai API error:", falErr);
+        const errMsg = falErr instanceof Error ? falErr.message : "fal.ai API error";
+        await supabase.from("ai_generations").update({ status: "error", error_message: errMsg }).eq("id", generation.id);
+        return NextResponse.json({ error: `Image generation failed: ${errMsg}` }, { status: 500 });
+      }
+
+      if (!tempImageUrl) {
+        console.error("[Image-to-Image] No image URL returned from fal.ai");
+        await supabase.from("ai_generations").update({ status: "error", error_message: "AI did not return an image" }).eq("id", generation.id);
+        return NextResponse.json({ error: "AI did not return an image" }, { status: 500 });
+      }
+
+      console.log(`[Image-to-Image] Got temp image URL, persisting to storage...`);
+
+      // Persist generated image to Supabase Storage
+      const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, generation.id);
+
+      outputAssets = [{ title: uploadedUrls.length > 1 ? "Combined Image" : "Transformed Image", kind: "image", preview: imageUrl, prompt }];
 
     } else if (mode === "caption") {
       const systemPrompt = [
@@ -163,7 +310,16 @@ export async function POST(request: Request) {
       .update({ status: "completed", completed_at: new Date().toISOString() })
       .eq("id", generation.id);
 
-    return NextResponse.json({ generation: { ...generation, status: "completed", outputAssets: assets } }, { status: 201 });
+    // Return enhanced prompt di response agar user tahu prompt yang dipakai AI
+    const responsePrompt = outputAssets[0]?.prompt || prompt;
+    return NextResponse.json({ 
+      generation: { 
+        ...generation, 
+        status: "completed", 
+        outputAssets: assets,
+        enhancedPrompt: mode === "text-to-image" ? responsePrompt : undefined 
+      } 
+    }, { status: 201 });
 
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);

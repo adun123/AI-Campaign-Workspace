@@ -1,67 +1,83 @@
 import { createClient } from "@/lib/supabase/server";
 import { getWorkspaceId } from "@/lib/get-workspace-id";
-import googleAI from "@/lib/google-ai";
+import fal from "@/lib/fal-ai";
 import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
   const workspaceId = await getWorkspaceId();
   if (!workspaceId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { campaign_id, source_image, instruction } = await request.json();
-  if (!source_image || !instruction || !campaign_id) {
-    return NextResponse.json({ error: "campaign_id, source_image, and instruction are required." }, { status: 400 });
+  const body = await request.json();
+  console.log("[Edit API] Received:", {
+    campaign_id: body.campaign_id,
+    asset_id: body.asset_id,
+    instruction: body.instruction,
+    source_image_type: typeof body.source_image,
+    source_image_length: body.source_image?.length ?? 0,
+    source_image_prefix: body.source_image?.slice(0, 50),
+    has_mask: !!body.mask,
+  });
+
+  const { source_image, instruction } = body;
+  if (!source_image || !instruction) {
+    return NextResponse.json({ 
+      error: "Missing required fields",
+      details: { 
+        has_source_image: !!source_image, 
+        has_instruction: !!instruction,
+      }
+    }, { status: 400 });
   }
 
   try {
-    const base64Match = source_image.match(/^data:(image\/\w+);base64,(.+)$/);
-    if (!base64Match) {
-      return NextResponse.json({ error: "Invalid source image format" }, { status: 400 });
+    if (typeof source_image !== "string" || (!source_image.startsWith("data:image/") && !source_image.startsWith("http"))) {
+      return NextResponse.json({ error: `Invalid source image format. Got: "${source_image.slice(0, 50)}..."`, status: 400 });
     }
-    const mimeType = base64Match[1];
-    const imageData = base64Match[2];
 
     const supabase = await createClient();
+
+    // Resolve campaign_id: prefer body.campaign_id, fallback to looking up via asset_id
+    let campaignId = body.campaign_id;
+    if (!campaignId && body.asset_id) {
+      const { data: asset } = await supabase
+        .from("assets")
+        .select("campaign_id")
+        .eq("id", body.asset_id)
+        .single();
+      if (asset) campaignId = asset.campaign_id;
+    }
+    if (!campaignId) {
+      return NextResponse.json({ error: "Could not determine campaign_id" }, { status: 400 });
+    }
 
     // Create generation record
     const { data: generation, error: genError } = await supabase
       .from("ai_generations")
-      .insert({ campaign_id, mode: "image-to-image", prompt: `✏️ Edit: ${instruction}`, status: "processing" })
+      .insert({ campaign_id: campaignId, mode: "image-to-image", prompt: `✏️ Edit: ${instruction}`, status: "processing" })
       .select()
       .single();
 
     if (genError) return NextResponse.json({ error: genError.message }, { status: 500 });
 
-    const response = await googleAI.models.generateContent({
-      model: "gemini-3.1-flash-image",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            { inlineData: { mimeType, data: imageData } },
-            { text: `Edit this image: ${instruction}` },
-          ],
-        },
-      ],
-      config: { responseModalities: ["TEXT", "IMAGE"] },
+    const result = await fal.subscribe("fal-ai/flux-pro/kontext", {
+      input: {
+        prompt: `Edit this image: ${instruction}. Preserve the original image structure and composition. Only apply the specific edit requested.`,
+        image_url: source_image,
+        num_images: 1,
+      },
     });
 
-    const parts = response.candidates?.[0]?.content?.parts ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const imagePart = parts.find((p: any) =>
-      !p.thought && p.inlineData?.mimeType?.startsWith("image/")
-    ) as { inlineData?: { mimeType?: string; data?: string } } | undefined;
+    const editedUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
 
-    if (!imagePart?.inlineData?.data) {
+    if (!editedUrl) {
       await supabase.from("ai_generations").update({ status: "error", error_message: "AI did not return an edited image" }).eq("id", generation.id);
       return NextResponse.json({ error: "AI did not return an edited image" }, { status: 500 });
     }
 
-    const editedUrl = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-
     // Create new asset
     const { data: asset, error } = await supabase
       .from("assets")
-      .insert({ campaign_id, title: "Edited Image", kind: "image", preview: editedUrl, prompt: instruction, channel: "Instagram", status: "draft" })
+      .insert({ campaign_id: campaignId, title: "Edited Image", kind: "image", preview: editedUrl, prompt: instruction, channel: "Instagram", status: "draft" })
       .select()
       .single();
 
