@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, ImageIcon, LayoutDashboard, Palette, Settings, Sparkles, TrendingUp, WandSparkles } from "lucide-react";
+import { CalendarDays, FolderOpen, ImageIcon, LayoutDashboard, Palette, Settings, Sparkles, TrendingUp, WandSparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/dashboard", label: "Dash", icon: LayoutDashboard },
+  { href: "/campaigns", label: "Campaign", icon: FolderOpen },
   { href: "/workspace", label: "Work", icon: Sparkles },
   { href: "/trends", label: "Trends", icon: TrendingUp },
   { href: "/content-studio", label: "Templates", icon: WandSparkles },
