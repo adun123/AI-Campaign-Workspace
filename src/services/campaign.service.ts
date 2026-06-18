@@ -6,7 +6,7 @@ export async function listCampaigns(): Promise<Campaign[]> {
   return res.json();
 }
 
-export async function createCampaign(data: Omit<Campaign, "id" | "createdAt">): Promise<Campaign> {
+export async function createCampaign(data: Omit<Campaign, "id" | "createdAt" | "workspaceId">): Promise<Campaign> {
   const res = await fetch("/api/campaigns", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
