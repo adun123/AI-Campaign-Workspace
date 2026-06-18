@@ -1,22 +1,23 @@
-import { assets } from "@/lib/mock-data";
-import { nowIso, waitForMock } from "@/services/mock-runtime";
 import type { Asset, ID } from "@/types/domain";
 
-let savedAssets = [...assets];
-
-export async function listAssets(campaignId?: ID) {
-  await waitForMock(260);
-  return campaignId ? savedAssets.filter((asset) => asset.campaignId === campaignId) : savedAssets;
+export async function listAssets(campaignId?: ID): Promise<Asset[]> {
+  const url = campaignId ? `/api/assets?campaign_id=${campaignId}` : "/api/assets";
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Gagal mengambil assets.");
+  return res.json();
 }
 
-export async function saveAsset(asset: Asset) {
-  await waitForMock(300);
-  const savedAsset: Asset = { ...asset, status: "saved", createdAt: nowIso() };
-  savedAssets = [savedAsset, ...savedAssets.filter((item) => item.id !== asset.id)];
-  return savedAsset;
+export async function saveAsset(asset: Omit<Asset, "id" | "createdAt">): Promise<Asset> {
+  const res = await fetch("/api/assets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...asset, status: "saved" }),
+  });
+  if (!res.ok) throw new Error("Gagal menyimpan asset.");
+  return res.json();
 }
 
-export async function deleteAsset(id: ID) {
-  await waitForMock(200);
-  savedAssets = savedAssets.filter((item) => item.id !== id);
+export async function deleteAsset(id: ID): Promise<void> {
+  const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Gagal menghapus asset.");
 }

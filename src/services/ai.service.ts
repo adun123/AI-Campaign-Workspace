@@ -1,74 +1,84 @@
-import { assets, generations } from "@/lib/mock-data";
-import { nowIso, waitForMock } from "@/services/mock-runtime";
-import type { AIGeneration, Asset, CampaignChannel, GenerationMode, ID } from "@/types/domain";
+import type { AIGeneration, CampaignChannel, GenerationMode, ID } from "@/types/domain";
 
 export type GenerationRequest = {
   campaignId: ID;
-  mode: GenerationMode;
+  mode: GenerationMode | "caption";
   prompt: string;
+  channel?: CampaignChannel;
   sourceAssetId?: ID;
-  simulateFailure?: boolean;
+  images?: string[];
+  aspectRatio?: string;
 };
 
-let generationHistory = [...generations];
+export async function listGenerations(campaignId: ID): Promise<AIGeneration[]> {
+  const res = await fetch(`/api/generate?campaign_id=${campaignId}`);
+  if (!res.ok) throw new Error("Gagal mengambil generations.");
 
-export async function listGenerations(campaignId: ID) {
-  await waitForMock(240);
-  return generationHistory.filter((generation) => generation.campaignId === campaignId);
-}
+  const data = await res.json();
 
-export async function deleteGeneration(id: ID) {
-  await waitForMock(200);
-  generationHistory = generationHistory.filter((g) => g.id !== id);
+  // Transform API response to match frontend type
+  return data.map((gen: Record<string, unknown>) => ({
+    id: gen.id,
+    campaignId: gen.campaign_id,
+    mode: gen.mode,
+    prompt: gen.prompt,
+    status: gen.status,
+    sourceAssetId: gen.source_asset_id,
+    createdAt: gen.created_at,
+    completedAt: gen.completed_at,
+    errorMessage: gen.error_message,
+    outputAssets: (gen.generation_outputs as Array<{ assets: Record<string, unknown> }>)?.map((go) => ({
+      id: go.assets.id,
+      campaignId: go.assets.campaign_id,
+      title: go.assets.title,
+      kind: go.assets.kind,
+      prompt: go.assets.prompt,
+      preview: go.assets.preview,
+      channel: go.assets.channel,
+      status: go.assets.status,
+      createdAt: go.assets.created_at,
+    })) ?? [],
+  }));
 }
 
 export async function generateAssets(request: GenerationRequest): Promise<AIGeneration> {
-  const queued: AIGeneration = {
-    id: `generation_${Date.now()}`,
-    campaignId: request.campaignId,
-    mode: request.mode,
-    prompt: request.prompt,
-    status: "queued",
-    sourceAssetId: request.sourceAssetId,
-    outputAssets: [],
-    createdAt: nowIso(),
-  };
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      campaign_id: request.campaignId,
+      mode: request.mode,
+      prompt: request.prompt,
+      channel: request.channel,
+      source_asset_id: request.sourceAssetId,
+      images: request.images,
+      aspect_ratio: request.aspectRatio,
+    }),
+  });
 
-  generationHistory = [queued, ...generationHistory];
-  await waitForMock(760);
-
-  if (request.simulateFailure) {
-    const failed: AIGeneration = {
-      ...queued,
-      status: "error",
-      errorMessage: "The mock image model rejected this test prompt. Retry will reuse the prompt without the simulated failure flag.",
-      completedAt: nowIso(),
-    };
-
-    generationHistory = generationHistory.map((generation) => (generation.id === queued.id ? failed : generation));
-    throw new Error(failed.errorMessage);
+  if (!res.ok) {
+    const json = await res.json();
+    throw new Error(json.error ?? "Gagal generate.");
   }
 
-  const channels: CampaignChannel[] = ["LinkedIn", "Instagram", "Email"];
-  const outputAssets: Asset[] = [0, 1, 2].map((index) => ({
-    id: `asset_${Date.now()}_${index}`,
-    campaignId: request.campaignId,
-    title: request.mode === "image-to-image" ? `Refined Concept ${index + 1}` : `Generated Direction ${index + 1}`,
-    kind: index === 1 ? "carousel" : "image",
-    prompt: request.prompt,
-    preview: [assets[0].preview, assets[1].preview, assets[2].preview][index],
-    channel: channels[index],
-    status: "draft",
-    createdAt: nowIso(),
-  }));
+  const { generation } = await res.json();
 
-  const completed: AIGeneration = {
-    ...queued,
-    status: "completed",
-    outputAssets,
-    completedAt: nowIso(),
+  // Transform API response to match frontend type
+  return {
+    id: generation.id,
+    campaignId: generation.campaign_id,
+    mode: generation.mode,
+    prompt: generation.prompt,
+    status: generation.status,
+    sourceAssetId: generation.source_asset_id,
+    createdAt: generation.created_at,
+    completedAt: generation.completed_at,
+    errorMessage: generation.error_message,
+    outputAssets: generation.outputAssets ?? [],
   };
+}
 
-  generationHistory = generationHistory.map((generation) => (generation.id === queued.id ? completed : generation));
-  return completed;
+export async function deleteGeneration(id: ID): Promise<void> {
+  const res = await fetch(`/api/generate/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Gagal menghapus generation.");
 }
