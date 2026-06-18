@@ -212,3 +212,23 @@ Utilitas dan data statis.
 | File | Keterangan |
 |------|-----------|
 | `domain.ts` | Type definitions domain: `User`, `Workspace`, `Campaign`, `BrandKit`, `AIGeneration`, `Asset`, `ScheduledPost` |
+
+
+Saya sudah menemukan dan memperbaiki 2 bug di fitur image-to-image yang menyebabkan gagal saat menggabung gambar:
+
+  Bug 1: Aspect ratio 4:5 tidak didukung oleh fal.ai
+
+  Frontend kamu punya opsi 4:5 (Feed Portrait), tapi endpoint fal-ai/flux-pro/kontext/multi hanya menerima: 1:1, 16:9,
+  9:16, 4:3, 3:4, 3:2, 2:3, 21:9, 9:21. Kalau user pilih 4:5, API langsung error. Sekarang sudah di-map ke 3:4 yang
+  paling mendekati.
+
+  Bug 2: Base64 payload terlalu besar
+
+  Saat attach 2+ gambar, semua dikirim sebagai base64 data URI langsung ke API fal.ai. Untuk 2-5 gambar resolusi tinggi,
+  total payload bisa 10-30MB+ yang menyebabkan timeout/request body too large. Sekarang gambar di-upload dulu ke fal.ai
+  storage (fal.storage.upload()) dan hanya URL-nya yang dikirim ke endpoint kontext/multi.
+
+  File yang diubah: frontend-kaiva/src/app/api/generate/route.ts
+
+  Coba test lagi — attach 2+ gambar, pilih mode Image, dan kirim prompt untuk menggabungkannya. Seharusnya sudah bisa
+  berjalan.
