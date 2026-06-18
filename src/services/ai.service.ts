@@ -1,4 +1,4 @@
-import type { AIGeneration, CampaignChannel, GenerationMode, ID } from "@/types/domain";
+import type { AIGeneration, Asset, CampaignChannel, GenerationMode, ID } from "@/types/domain";
 
 export type GenerationRequest = {
   campaignId: ID;
@@ -61,21 +61,23 @@ export async function generateAssets(request: GenerationRequest): Promise<AIGene
     throw new Error(json.error ?? "Gagal generate.");
   }
 
-  const { generation } = await res.json();
+  const json = (await res.json()) as Record<string, unknown>;
+  const generation = json.generation as Record<string, unknown>;
 
   // Transform API response to match frontend type
   return {
-    id: generation.id,
-    campaignId: generation.campaign_id,
-    mode: generation.mode,
-    prompt: generation.prompt,
-    status: generation.status,
-    sourceAssetId: generation.source_asset_id,
-    createdAt: generation.created_at,
-    completedAt: generation.completed_at,
-    errorMessage: generation.error_message,
-    outputAssets: generation.outputAssets ?? [],
-  };
+    id: generation.id as string,
+    campaignId: generation.campaign_id as string,
+    mode: generation.mode as string,
+    prompt: generation.prompt as string,
+    status: generation.status as string,
+    sourceAssetId: generation.source_asset_id as string | undefined,
+    createdAt: generation.created_at as string,
+    completedAt: generation.completed_at as string | undefined,
+    errorMessage: generation.error_message as string | undefined,
+    outputAssets: (generation.outputAssets as Asset[]) ?? [],
+    enhancedPrompt: generation.enhancedPrompt as string | undefined,
+  } as AIGeneration;
 }
 
 export async function deleteGeneration(id: ID): Promise<void> {
