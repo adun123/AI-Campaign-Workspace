@@ -41,7 +41,7 @@ export function LandingPage() {
           <span className="text-lg font-semibold text-text-primary">Kaiva</span>
         </div>
         <Button variant="ghost" size="sm" asChild>
-          <Link href="/dashboard">Skip</Link>
+          <Link href="/auth/login">Masuk</Link>
         </Button>
       </header>
 
@@ -99,7 +99,7 @@ export function LandingPage() {
             </Button>
             {isLast ? (
               <Button asChild>
-                <Link href="/dashboard">Get Started <ArrowRight className="h-4 w-4" /></Link>
+                <Link href="/auth/register">Mulai Gratis <ArrowRight className="h-4 w-4" /></Link>
               </Button>
             ) : (
               <Button onClick={() => go(current + 1)}>

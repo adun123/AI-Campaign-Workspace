@@ -106,7 +106,7 @@ function UpcomingPosts({ posts, assets }: { posts: { id: string; assetId: string
               <CalendarClock className="h-4 w-4 shrink-0 text-accent" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-medium text-text-primary">{asset?.title ?? "Post"}</p>
-                <p className="text-xs text-text-muted">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(post.publishAt))}</p>
+                <p className="text-xs text-text-muted">{post.publishAt ? new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(post.publishAt)) : "Not scheduled"}</p>
               </div>
               <Badge tone="primary">{post.channel}</Badge>
             </div>

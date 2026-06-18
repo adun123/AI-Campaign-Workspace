@@ -1,12 +1,13 @@
 "use client";
 
-import { BarChart3, Layers, Send } from "lucide-react";
+import { BarChart3, FolderOpen, Layers, Send } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useDashboardSummaryQuery } from "@/hooks/use-workspace-data";
 
-const icons = {
+const icons: Record<string, typeof Layers> = {
   Assets: Layers,
   Scheduled: Send,
+  Campaigns: FolderOpen,
   Readiness: BarChart3,
 };
 

@@ -6,18 +6,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SectionHeading } from "@/components/shared/section-heading";
-import { brandKits } from "@/lib/mock-data";
 import { useToastStore } from "@/stores/toast-store";
+import { useQuery } from "@tanstack/react-query";
+import { listBrandKits } from "@/services/brand-kit.service";
 import type { BrandKit } from "@/types/domain";
 
 export function BrandKitView() {
   const addToast = useToastStore((s) => s.addToast);
-  const [kits, setKits] = useState<BrandKit[]>(brandKits);
-  const [activeId, setActiveId] = useState(kits[0]?.id ?? "");
-  const kit = kits.find((k) => k.id === activeId);
+  const { data: fetchedKits = [] } = useQuery({ queryKey: ["brand-kits"], queryFn: listBrandKits });
+  const [kits, setKits] = useState<BrandKit[]>([]);
+  const allKits = kits.length > 0 ? kits : fetchedKits;
+  const [activeId, setActiveId] = useState(allKits[0]?.id ?? "");
+  const kit = allKits.find((k) => k.id === activeId);
 
   function updateKit(updates: Partial<BrandKit>) {
-    setKits((prev) => prev.map((k) => (k.id === activeId ? { ...k, ...updates } : k)));
+    setKits((prev) => (prev.length > 0 ? prev : fetchedKits).map((k) => (k.id === activeId ? { ...k, ...updates } : k)));
   }
 
   function createNewKit() {

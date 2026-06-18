@@ -6,9 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SectionHeading } from "@/components/shared/section-heading";
-import { currentUser, currentWorkspace } from "@/lib/mock-data";
 import { aiModels } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
+import { useSessionQuery } from "@/hooks/use-workspace-data";
 
 type SettingsTab = "profile" | "ai" | "notifications" | "connected" | "danger";
 
@@ -22,6 +22,9 @@ const tabs: { id: SettingsTab; label: string; icon: typeof User }[] = [
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("profile");
+  const { data: session } = useSessionQuery();
+  const currentWorkspace = session?.workspace;
+  const currentUser = session?.profile;
 
   return (
     <section className="space-y-5">
@@ -47,24 +50,27 @@ export function SettingsView() {
 
 function ProfileSection() {
   const addToast = useToastStore((s) => s.addToast);
-  const [name, setName] = useState(currentUser.name);
-  const [email, setEmail] = useState(currentUser.email);
+  const { data: session } = useSessionQuery();
+  const profile = session?.profile;
+  const workspace = session?.workspace;
+  const [name, setName] = useState(profile?.full_name ?? "");
+  const [email, setEmail] = useState(session?.user?.email ?? "");
 
   return (
     <Card>
       <CardHeader><CardTitle>Profile</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-lg font-semibold text-white">{currentUser.avatarInitials}</div>
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-lg font-semibold text-white">{profile?.full_name?.[0]?.toUpperCase() ?? "K"}</div>
           <div>
             <p className="text-sm font-medium text-text-primary">{name}</p>
-            <p className="text-xs text-text-muted">{currentWorkspace.name}</p>
-            <Badge tone="accent" className="mt-1">{currentWorkspace.plan} plan</Badge>
+            <p className="text-xs text-text-muted">{workspace?.name ?? "Workspace"}</p>
+            <Badge tone="accent" className="mt-1">{workspace?.plan ?? "starter"} plan</Badge>
           </div>
         </div>
         <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" /></Field>
         <Field label="Email"><input value={email} onChange={(e) => setEmail(e.target.value)} type="email" className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" /></Field>
-        <Field label="Workspace Name"><input defaultValue={currentWorkspace.name} className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" /></Field>
+        <Field label="Workspace Name"><input defaultValue={workspace?.name ?? ""} className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" /></Field>
         <Button size="sm" onClick={() => addToast("success", "Profile saved")}>Save Profile</Button>
       </CardContent>
     </Card>
