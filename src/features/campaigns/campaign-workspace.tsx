@@ -14,7 +14,7 @@ import { generateAssets, deleteGeneration } from "@/services/ai.service";
 import { saveAsset } from "@/services/asset.service";
 import { scheduleAsset } from "@/services/scheduler.service";
 import { createCampaign } from "@/services/campaign.service";
-import { useChatStore, aiModels, stylePresets, type ChatMessage } from "@/stores/chat-store";
+import { useChatStore, aiModels, stylePresets, type ChatMessage, type ImageResolution, type ImageQuality } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useTrendBriefStore } from "@/stores/trend-brief-store";
 import type { Asset, AIGeneration, CampaignChannel, GenerationMode } from "@/types/domain";
@@ -37,14 +37,17 @@ const PROMPT_SUGGESTIONS = [
   { label: "Promotional Poster", prompt: "Promotional poster design with clear call-to-action" },
 ];
 
-function calculateCost(generationMode: GenerationMode, aspectRatio: string, numImages: number = 1): number {
+function calculateCost(generationMode: GenerationMode, aspectRatio: string, numImages: number = 1, modelId: string = "nano-banana-2"): number {
+  const model = aiModels.find((m) => m.id === modelId);
+  const basePrice = model?.pricePerImage ?? 0.003;
+  
   if (generationMode === "text-to-image") {
     const aspectMultiplier = aspectRatio === "16:9" || aspectRatio === "9:16" ? 1.2 : 1.0;
-    return 0.003 * aspectMultiplier;
+    return basePrice * aspectMultiplier;
   }
-  // Image-to-image: Flux Kontext Pro $0.04/image, multi charges per input image
+  // Image-to-image
   const aspectMultiplier = aspectRatio === "16:9" || aspectRatio === "9:16" ? 1.2 : 1.0;
-  return 0.04 * numImages * aspectMultiplier;
+  return basePrice * numImages * aspectMultiplier;
 }
 
 export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) {
@@ -93,6 +96,10 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
   const setBatchCount = useChatStore((s) => s.setBatchCount);
   const stylePreset = useChatStore((s) => s.stylePreset);
   const setStylePreset = useChatStore((s) => s.setStylePreset);
+  const resolution = useChatStore((s) => s.resolution);
+  const setResolution = useChatStore((s) => s.setResolution);
+  const quality = useChatStore((s) => s.quality);
+  const setQuality = useChatStore((s) => s.setQuality);
 
   const addToast = useToastStore((s) => s.addToast);
 
@@ -122,7 +129,7 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
       if (mode === "image-to-image" && imageFiles.length > 0) {
         images = await Promise.all(imageFiles.map((file) => fileToDataURI(file)));
       }
-      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio, batchCount, stylePreset });
+      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio, batchCount, stylePreset, model, resolution, quality });
     },
     onSuccess: (generation) => {
       const enhancedPrompt = (generation as { enhancedPrompt?: string }).enhancedPrompt;
@@ -485,6 +492,40 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
 
             <div className="h-5 w-px bg-border" />
 
+            {/* Resolution selector - only for models that support it */}
+            {(() => {
+              const currentModel = aiModels.find((m) => m.id === model);
+              if (!currentModel?.resolutions) return null;
+              
+              return (
+                <>
+                  <ResolutionSelector 
+                    resolutions={currentModel.resolutions}
+                    selected={resolution}
+                    onChange={setResolution}
+                  />
+                  <div className="h-5 w-px bg-border" />
+                </>
+              );
+            })()}
+
+            {/* Quality selector - only for models that support it */}
+            {(() => {
+              const currentModel = aiModels.find((m) => m.id === model);
+              if (!currentModel?.qualityLevels) return null;
+              
+              return (
+                <>
+                  <QualitySelector 
+                    levels={currentModel.qualityLevels}
+                    selected={quality}
+                    onChange={setQuality}
+                  />
+                  <div className="h-5 w-px bg-border" />
+                </>
+              );
+            })()}
+
             {/* Prompt suggestions */}
             <div className="relative">
               <button
@@ -553,10 +594,10 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
                 <DollarSign className="h-3 w-3" />
-                <span>~${(calculateCost(mode, aspectRatio, attachedImages.length || 1) * batchCount).toFixed(3)}</span>
+                <span>~${(calculateCost(mode, aspectRatio, attachedImages.length || 1, model) * batchCount).toFixed(3)}</span>
               </div>
               <span className="hidden sm:inline text-xs text-text-muted/60 shrink-0">
-                {batchCount > 1 ? `${batchCount} images` : mode === "text-to-image" ? "1 image" : attachedImages.length > 1 ? `Multi (${attachedImages.length} images)` : "1 image"}
+                {aiModels.find((m) => m.id === model)?.label} • {batchCount > 1 ? `${batchCount} images` : "1 image"}
               </span>
               {input.length > 0 && (
                 <span className="hidden sm:inline text-xs text-text-muted shrink-0">
@@ -594,10 +635,25 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
                 {showModelPicker && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setShowModelPicker(false)} />
-                    <div className="absolute bottom-full right-0 z-50 mb-2 w-44 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
+                    <div className="absolute bottom-full right-0 z-50 mb-2 w-80 rounded-card border bg-surface/95 p-2 shadow-soft backdrop-blur-xl">
+                      <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-text-muted">AI Models</p>
                       {aiModels.map((m) => (
-                        <button key={m.id} type="button" onClick={() => { setModel(m.id); setShowModelPicker(false); }} className={`flex w-full items-center rounded-control px-3 py-2 text-xs transition ${model === m.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"}`}>
-                          {m.label}
+                        <button 
+                          key={m.id} 
+                          type="button" 
+                          onClick={() => { setModel(m.id); setShowModelPicker(false); }} 
+                          className={`flex w-full flex-col gap-1 rounded-control px-3 py-2 text-left transition ${model === m.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium">{m.label}</span>
+                            <span className="text-[10px] opacity-70">${m.pricePerImage}/img</span>
+                          </div>
+                          <p className="text-[10px] opacity-70 line-clamp-1">{m.description}</p>
+                          <div className="flex gap-1 mt-1">
+                            {m.acceptsImages && <span className="text-[9px] bg-accent/20 text-accent px-1.5 py-0.5 rounded">Edit</span>}
+                            {m.resolutions && <span className="text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">Res</span>}
+                            {m.qualityLevels && <span className="text-[9px] bg-success/20 text-success px-1.5 py-0.5 rounded">Quality</span>}
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -821,6 +877,82 @@ function StyleSelector() {
               >
                 <span className="text-xs font-medium">{style.label}</span>
                 <span className="text-[10px] opacity-70">{style.description}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ResolutionSelector({ resolutions, selected, onChange }: { resolutions: ImageResolution[], selected: ImageResolution, onChange: (res: ImageResolution) => void }) {
+  const [open, setOpen] = useState(false);
+
+  const resolutionLabels: Record<ImageResolution, string> = {
+    "0.5k": "512px",
+    "1k": "1024px",
+    "2k": "2048px",
+    "4k": "4096px",
+  };
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(!open)} title={`Resolution: ${resolutionLabels[selected]}`} className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary">
+        <span>{resolutionLabels[selected]}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-50 mb-2 w-32 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
+            {resolutions.map((res) => (
+              <button
+                key={res}
+                type="button"
+                onClick={() => { onChange(res); setOpen(false); }}
+                className={`flex w-full items-center rounded-control px-3 py-2 text-xs transition ${
+                  selected === res ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+                }`}
+              >
+                {resolutionLabels[res]}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function QualitySelector({ levels, selected, onChange }: { levels: ImageQuality[], selected: ImageQuality, onChange: (q: ImageQuality) => void }) {
+  const [open, setOpen] = useState(false);
+
+  const qualityLabels: Record<ImageQuality, string> = {
+    "auto": "Auto",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+  };
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(!open)} title={`Quality: ${qualityLabels[selected]}`} className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary">
+        <span>{qualityLabels[selected]}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-50 mb-2 w-32 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
+            {levels.map((level) => (
+              <button
+                key={level}
+                type="button"
+                onClick={() => { onChange(level); setOpen(false); }}
+                className={`flex w-full items-center rounded-control px-3 py-2 text-xs transition ${
+                  selected === level ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+                }`}
+              >
+                {qualityLabels[level]}
               </button>
             ))}
           </div>

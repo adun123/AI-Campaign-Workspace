@@ -1,7 +1,29 @@
 import { create } from "zustand";
 import type { Asset, GenerationMode } from "@/types/domain";
 
-export type AIModel = "auto" | "dall-e" | "midjourney" | "stable-diffusion" | "gemini-imagen" | "firefly";
+export type AIModel = 
+  | "nano-banana-2" 
+  | "nano-banana-2-edit" 
+  | "nano-banana-pro-edit" 
+  | "gpt-image-2-edit" 
+  | "seedream-v5-lite" 
+  | "flux-schnell";
+
+export type ImageResolution = "0.5k" | "1k" | "2k" | "4k";
+export type ImageQuality = "auto" | "low" | "medium" | "high";
+export type AspectRatioOption = "auto" | "length" | "1:1" | "4:5" | "9:16" | "16:9";
+
+export type ModelCapability = {
+  id: AIModel;
+  label: string;
+  description: string;
+  pricePerImage: number;
+  acceptsImages: boolean;
+  maxImages?: number;
+  resolutions?: ImageResolution[];
+  aspectRatios?: AspectRatioOption[];
+  qualityLevels?: ImageQuality[];
+};
 
 export type StylePreset = "none" | "photorealistic" | "minimalist" | "bold" | "creative";
 
@@ -13,13 +35,62 @@ export const stylePresets: { id: StylePreset; label: string; description: string
   { id: "creative", label: "Creative", description: "Artistic, unique, unconventional" },
 ];
 
-export const aiModels: { id: AIModel; label: string }[] = [
-  { id: "auto", label: "Auto" },
-  { id: "dall-e", label: "DALL·E" },
-  { id: "midjourney", label: "Midjourney" },
-  { id: "stable-diffusion", label: "Stable Diffusion" },
-  { id: "gemini-imagen", label: "Gemini Imagen" },
-  { id: "firefly", label: "Adobe Firefly" },
+export const aiModels: ModelCapability[] = [
+  {
+    id: "nano-banana-2",
+    label: "Nano Banana 2",
+    description: "Google's state-of-the-art text-to-image model",
+    pricePerImage: 0.08,
+    acceptsImages: false,
+    resolutions: ["0.5k", "1k", "2k", "4k"],
+    aspectRatios: ["auto", "length"],
+  },
+  {
+    id: "nano-banana-2-edit",
+    label: "Nano Banana 2 Edit",
+    description: "Image editing with Google's Nano Banana 2 model",
+    pricePerImage: 0.08,
+    acceptsImages: true,
+    maxImages: 10,
+    resolutions: ["0.5k", "1k", "2k", "4k"],
+    aspectRatios: ["auto", "length"],
+  },
+  {
+    id: "nano-banana-pro-edit",
+    label: "Nano Banana Pro Edit",
+    description: "Premium image editing with Google's Pro model",
+    pricePerImage: 0.15,
+    acceptsImages: true,
+    maxImages: 10,
+    resolutions: ["0.5k", "1k", "2k", "4k"],
+    aspectRatios: ["auto", "length"],
+  },
+  {
+    id: "gpt-image-2-edit",
+    label: "GPT Image 2 Edit",
+    description: "Advanced image editing with OpenAI's GPT Image 2",
+    pricePerImage: 0.10,
+    acceptsImages: true,
+    maxImages: 10,
+    qualityLevels: ["auto", "low", "medium", "high"],
+  },
+  {
+    id: "seedream-v5-lite",
+    label: "Seedream v5 Lite",
+    description: "Fast & budget-friendly image editing for ads",
+    pricePerImage: 0.035,
+    acceptsImages: true,
+    maxImages: 5,
+  },
+  {
+    id: "flux-schnell",
+    label: "Flux Schnell",
+    description: "Fast text-to-image generation",
+    pricePerImage: 0.003,
+    acceptsImages: false,
+    resolutions: ["1k"],
+    aspectRatios: ["1:1", "4:5", "9:16", "16:9"],
+  },
 ];
 
 export type AttachedFile = { id: string; file: File; preview: string };
@@ -60,6 +131,12 @@ type ChatState = {
   setBatchCount: (count: 1 | 2 | 4) => void;
   stylePreset: StylePreset;
   setStylePreset: (style: StylePreset) => void;
+
+  // Model-specific settings
+  resolution: ImageResolution;
+  setResolution: (res: ImageResolution) => void;
+  quality: ImageQuality;
+  setQuality: (q: ImageQuality) => void;
 
   // Image attachments
   attachedImages: AttachedFile[];
@@ -142,7 +219,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   mode: "text-to-image",
   setMode: (mode) => set({ mode }),
-  model: "auto",
+  model: "nano-banana-2",
   setModel: (model) => set({ model }),
   aspectRatio: "1:1" as string,
   setAspectRatio: (ar: string) => set({ aspectRatio: ar }),
@@ -151,6 +228,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setBatchCount: (count) => set({ batchCount: count }),
   stylePreset: "none",
   setStylePreset: (style) => set({ stylePreset: style }),
+
+  // Model-specific settings
+  resolution: "1k" as ImageResolution,
+  setResolution: (res) => set({ resolution: res }),
+  quality: "auto" as ImageQuality,
+  setQuality: (q) => set({ quality: q }),
 
   attachedImages: [],
   addImages: (files) =>
