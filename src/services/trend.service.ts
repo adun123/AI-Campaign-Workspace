@@ -3,6 +3,8 @@ import type { Trend, TrendNiche, TrendPlatform } from "@/lib/trend-data";
 export type TrendFilter = {
   platform?: TrendPlatform;
   niches: TrendNiche[];
+  country?: string;
+  period?: 7 | 30 | 120;
 };
 
 export async function discoverTrends(filter: TrendFilter): Promise<Trend[]> {
@@ -12,6 +14,8 @@ export async function discoverTrends(filter: TrendFilter): Promise<Trend[]> {
     body: JSON.stringify({
       platform: filter.platform || null,
       niches: filter.niches,
+      country: filter.country || "ID",
+      period: filter.period || 7,
     }),
   });
 

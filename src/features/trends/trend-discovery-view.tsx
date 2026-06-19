@@ -25,6 +25,8 @@ export function TrendDiscoveryView() {
 
   const [platform, setPlatform] = useState<TrendPlatform | "">("");
   const [niches, setNiches] = useState<TrendNiche[]>([]);
+  const [country, setCountry] = useState<string>("ID");
+  const [period, setPeriod] = useState<7 | 30 | 120>(7);
   const [results, setResults] = useState<Trend[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +39,12 @@ export function TrendDiscoveryView() {
     setLoading(true);
     setError(null);
     try {
-      const data = await discoverTrends({ platform: platform || undefined, niches });
+      const data = await discoverTrends({ 
+        platform: platform || undefined, 
+        niches,
+        country,
+        period,
+      });
       setResults(data);
       if (data.length === 0) {
         addToast("info", "No trends found for your filters. Try different combinations.");
@@ -82,6 +89,65 @@ export function TrendDiscoveryView() {
               <option value="">All platforms</option>
               {trendPlatforms.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm text-text-muted">Country</label>
+            <select
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+            >
+              <option value="ID">Indonesia</option>
+              <option value="US">United States</option>
+              <option value="GB">United Kingdom</option>
+              <option value="SG">Singapore</option>
+              <option value="MY">Malaysia</option>
+              <option value="TH">Thailand</option>
+              <option value="PH">Philippines</option>
+              <option value="VN">Vietnam</option>
+              <option value="JP">Japan</option>
+              <option value="KR">South Korea</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm text-text-muted">Time Period</label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPeriod(7)}
+                className={`flex-1 rounded-control border px-3 py-2 text-sm font-medium transition ${
+                  period === 7
+                    ? "border-accent bg-accent/10 text-text-primary"
+                    : "border-border bg-surface-muted text-text-muted hover:bg-surface-elevated"
+                }`}
+              >
+                7 Days
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriod(30)}
+                className={`flex-1 rounded-control border px-3 py-2 text-sm font-medium transition ${
+                  period === 30
+                    ? "border-accent bg-accent/10 text-text-primary"
+                    : "border-border bg-surface-muted text-text-muted hover:bg-surface-elevated"
+                }`}
+              >
+                30 Days
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriod(120)}
+                className={`flex-1 rounded-control border px-3 py-2 text-sm font-medium transition ${
+                  period === 120
+                    ? "border-accent bg-accent/10 text-text-primary"
+                    : "border-border bg-surface-muted text-text-muted hover:bg-surface-elevated"
+                }`}
+              >
+                120 Days
+              </button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -137,14 +203,20 @@ export function TrendDiscoveryView() {
           {results.map((trend) => {
             const config = levelConfig[trend.level];
             const Icon = config.icon;
+            const isRealtime = (trend as any).source === "realtime";
             return (
               <Card key={trend.id} className="flex flex-col transition-all hover:shadow-lg">
                 <CardContent className="flex flex-1 flex-col p-5">
                   <div className="flex items-start justify-between gap-2 mb-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Badge tone="primary">{trend.platform}</Badge>
                       <Badge tone="neutral">{trend.niche}</Badge>
+                      {isRealtime && (
+                        <Badge tone="accent">🔴 Live</Badge>
+                      )}
                     </div>
+                    <Badge tone={config.tone}><Icon className="mr-1 h-3 w-3" />{config.label}</Badge>
+                  </div>
                     <Badge tone={config.tone}><Icon className="mr-1 h-3 w-3" />{config.label}</Badge>
                   </div>
                   <h3 className="mb-3 flex-1 text-base font-semibold leading-6 text-text-primary">
