@@ -3,6 +3,16 @@ import type { Asset, GenerationMode } from "@/types/domain";
 
 export type AIModel = "auto" | "dall-e" | "midjourney" | "stable-diffusion" | "gemini-imagen" | "firefly";
 
+export type StylePreset = "none" | "photorealistic" | "minimalist" | "bold" | "creative";
+
+export const stylePresets: { id: StylePreset; label: string; description: string }[] = [
+  { id: "none", label: "Normal", description: "No style applied" },
+  { id: "photorealistic", label: "Photorealistic", description: "Realistic photography, natural lighting" },
+  { id: "minimalist", label: "Minimalist", description: "Clean, simple, minimalist design" },
+  { id: "bold", label: "Bold", description: "Vibrant colors, high contrast, impactful" },
+  { id: "creative", label: "Creative", description: "Artistic, unique, unconventional" },
+];
+
 export const aiModels: { id: AIModel; label: string }[] = [
   { id: "auto", label: "Auto" },
   { id: "dall-e", label: "DALL·E" },
@@ -44,6 +54,12 @@ type ChatState = {
   setModel: (model: AIModel) => void;
   aspectRatio: string;
   setAspectRatio: (ar: string) => void;
+
+  // Batch and Style
+  batchCount: 1 | 2 | 4;
+  setBatchCount: (count: 1 | 2 | 4) => void;
+  stylePreset: StylePreset;
+  setStylePreset: (style: StylePreset) => void;
 
   // Image attachments
   attachedImages: AttachedFile[];
@@ -130,6 +146,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setModel: (model) => set({ model }),
   aspectRatio: "1:1" as string,
   setAspectRatio: (ar: string) => set({ aspectRatio: ar }),
+
+  batchCount: 1,
+  setBatchCount: (count) => set({ batchCount: count }),
+  stylePreset: "none",
+  setStylePreset: (style) => set({ stylePreset: style }),
 
   attachedImages: [],
   addImages: (files) =>

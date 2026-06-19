@@ -3,15 +3,23 @@ import type { Trend } from "@/lib/trend-data";
 
 type TrendBriefState = {
   pinnedTrend: Trend | null;
+  targetCampaignId: string | null;
   pinTrend: (trend: Trend) => void;
   dismissTrend: () => void;
+  setTargetCampaign: (campaignId: string | null) => void;
+  clearTargetCampaign: () => void;
   generatePromptFromTrend: (trend: Trend, template?: string) => string;
 };
 
 export const useTrendBriefStore = create<TrendBriefState>((set, get) => ({
   pinnedTrend: null,
+  targetCampaignId: null,
+  
   pinTrend: (trend) => set({ pinnedTrend: trend }),
   dismissTrend: () => set({ pinnedTrend: null }),
+  
+  setTargetCampaign: (campaignId) => set({ targetCampaignId: campaignId }),
+  clearTargetCampaign: () => set({ targetCampaignId: null }),
   
   generatePromptFromTrend: (trend: Trend, template?: string) => {
     const hashtags = trend.hashtags.join(" ");

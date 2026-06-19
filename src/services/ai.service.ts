@@ -1,4 +1,5 @@
 import type { AIGeneration, Asset, CampaignChannel, GenerationMode, ID } from "@/types/domain";
+import type { StylePreset } from "@/stores/chat-store";
 
 export type GenerationRequest = {
   campaignId: ID;
@@ -8,6 +9,8 @@ export type GenerationRequest = {
   sourceAssetId?: ID;
   images?: string[];
   aspectRatio?: string;
+  batchCount?: 1 | 2 | 4;
+  stylePreset?: StylePreset;
 };
 
 export async function listGenerations(campaignId: ID): Promise<AIGeneration[]> {
@@ -53,6 +56,8 @@ export async function generateAssets(request: GenerationRequest): Promise<AIGene
       source_asset_id: request.sourceAssetId,
       images: request.images,
       aspect_ratio: request.aspectRatio,
+      num_images: request.batchCount ?? 1,
+      style_preset: request.stylePreset ?? "none",
     }),
   });
 

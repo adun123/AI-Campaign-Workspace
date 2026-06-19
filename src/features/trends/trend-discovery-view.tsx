@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Flame, Loader2, Rocket, Share2, Sparkles, TrendingUp } from "lucide-react";
+import { Copy, Flame, Loader2, Rocket, Share2, Sparkles, TrendingUp, X, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,8 @@ import { trendNiches, trendPlatforms, type Trend, type TrendLevel, type TrendNic
 import { discoverTrends } from "@/services/trend.service";
 import { useTrendBriefStore } from "@/stores/trend-brief-store";
 import { useToastStore } from "@/stores/toast-store";
+import { useCampaignsQuery } from "@/hooks/use-workspace-data";
+import type { Campaign } from "@/types/domain";
 
 const levelConfig: Record<TrendLevel, { icon: typeof Flame; label: string; tone: "error" | "warning" | "accent" }> = {
   high: { icon: Flame, label: "High", tone: "error" },
@@ -21,7 +23,9 @@ const levelConfig: Record<TrendLevel, { icon: typeof Flame; label: string; tone:
 export function TrendDiscoveryView() {
   const router = useRouter();
   const pinTrend = useTrendBriefStore((s) => s.pinTrend);
+  const setTargetCampaign = useTrendBriefStore((s) => s.setTargetCampaign);
   const addToast = useToastStore((s) => s.addToast);
+  const campaignsQuery = useCampaignsQuery();
 
   const [platform, setPlatform] = useState<TrendPlatform | "">("");
   const [niches, setNiches] = useState<TrendNiche[]>([]);
@@ -30,6 +34,8 @@ export function TrendDiscoveryView() {
   const [results, setResults] = useState<Trend[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [pendingTrend, setPendingTrend] = useState<Trend | null>(null);
 
   function toggleNiche(niche: TrendNiche) {
     setNiches((prev) => (prev.includes(niche) ? prev.filter((n) => n !== niche) : [...prev, niche]));
@@ -59,9 +65,38 @@ export function TrendDiscoveryView() {
   }
 
   function handleUseAsBrief(trend: Trend) {
-    pinTrend(trend);
-    addToast("success", "Trend pinned — use quick actions in Workspace to generate content");
-    router.push("/workspace?from=trends");
+    const campaigns = campaignsQuery.data ?? [];
+    
+    // Case 1: No campaigns — redirect to create one
+    if (campaigns.length === 0) {
+      pinTrend(trend);
+      addToast("info", "Create a campaign first to use this trend as brief");
+      router.push("/campaigns");
+      return;
+    }
+    
+    // Case 2: Exactly 1 campaign — use it directly
+    if (campaigns.length === 1) {
+      pinTrend(trend);
+      setTargetCampaign(campaigns[0].id);
+      addToast("success", `Trend applied to "${campaigns[0].name}"`);
+      router.push("/workspace");
+      return;
+    }
+    
+    // Case 3: Multiple campaigns — show selector
+    setPendingTrend(trend);
+    setSelectorOpen(true);
+  }
+
+  function handleSelectCampaign(campaign: Campaign) {
+    if (!pendingTrend) return;
+    pinTrend(pendingTrend);
+    setTargetCampaign(campaign.id);
+    addToast("success", `Trend applied to "${campaign.name}"`);
+    setSelectorOpen(false);
+    setPendingTrend(null);
+    router.push("/workspace");
   }
 
   function handleCopyHashtags(trend: Trend) {
@@ -252,6 +287,88 @@ export function TrendDiscoveryView() {
           })}
         </div>
       )}
+
+      {/* Campaign Selector Modal */}
+      {selectorOpen && pendingTrend && (
+        <CampaignSelectorModal
+          trend={pendingTrend}
+          campaigns={campaignsQuery.data ?? []}
+          onSelect={handleSelectCampaign}
+          onClose={() => {
+            setSelectorOpen(false);
+            setPendingTrend(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function CampaignSelectorModal({
+  trend,
+  campaigns,
+  onSelect,
+  onClose,
+}: {
+  trend: Trend;
+  campaigns: Campaign[];
+  onSelect: (campaign: Campaign) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <Card className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold text-text-primary">Select Campaign</h3>
+              <p className="text-sm text-text-muted mt-1">
+                Which campaign should this trend be applied to?
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-1 text-text-muted hover:text-text-primary transition-colors"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="mb-4 p-3 rounded-lg bg-surface-muted border border-border">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge tone={trend.level === "high" ? "error" : trend.level === "rising" ? "warning" : "success"}>
+                {trend.level}
+              </Badge>
+              <Badge tone="neutral">{trend.platform}</Badge>
+            </div>
+            <p className="text-sm font-medium text-text-primary">{trend.title}</p>
+          </div>
+
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {campaigns.map((campaign) => (
+              <button
+                key={campaign.id}
+                onClick={() => onSelect(campaign)}
+                className="w-full p-3 rounded-lg border border-border hover:border-accent hover:bg-accent/5 transition-colors text-left group"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 rounded-lg bg-surface-muted group-hover:bg-accent/10 transition-colors">
+                    <FolderOpen className="h-5 w-5 text-text-muted group-hover:text-accent" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-text-primary">{campaign.name}</p>
+                    {campaign.objective && (
+                      <p className="text-sm text-text-muted truncate mt-0.5">
+                        {campaign.objective}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

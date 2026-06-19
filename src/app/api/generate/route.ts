@@ -90,10 +90,23 @@ export async function POST(request: Request) {
   const workspaceId = await getWorkspaceId();
   if (!workspaceId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { campaign_id, mode, prompt, channel, images, aspect_ratio } = await request.json();
+  const { campaign_id, mode, prompt, channel, images, aspect_ratio, num_images = 1, style_preset = "none" } = await request.json();
   if (!campaign_id || !mode || !prompt) {
     return NextResponse.json({ error: "campaign_id, mode, dan prompt wajib diisi." }, { status: 400 });
   }
+
+  // Validate num_images (1, 2, or 4)
+  const validBatchCounts = [1, 2, 4];
+  const batchSize = validBatchCounts.includes(num_images) ? num_images : 1;
+
+  // Style preset modifiers
+  const styleModifiers: Record<string, string> = {
+    photorealistic: "photorealistic, natural lighting, high detail, realistic textures, professional photography",
+    minimalist: "minimalist design, clean composition, simple elements, white space, modern aesthetic",
+    bold: "bold colors, high contrast, vibrant, eye-catching, impactful design, strong visual impact",
+    creative: "creative, artistic, unique perspective, unconventional composition, imaginative, artistic flair",
+  };
+  const styleModifier = styleModifiers[style_preset] || "";
 
   const supabase = await createClient();
 
@@ -126,7 +139,9 @@ export async function POST(request: Request) {
       const enhancedPrompt = await enhancePrompt(prompt, brandContext, channel ?? "social media");
       console.log("[Enhance] Enhanced prompt:", enhancedPrompt);
 
-      const fullPrompt = `${enhancedPrompt}. ${brandContext} High quality, ${channel ?? "social media"} format, marketing visual.`;
+      // Apply style preset
+      const stylePart = styleModifier ? `, ${styleModifier}` : "";
+      const fullPrompt = `${enhancedPrompt}${stylePart}. ${brandContext} High quality, ${channel ?? "social media"} format, marketing visual.`;
 
       // Map aspect_ratio to fal.ai image_size
       const sizeMap = {
@@ -138,22 +153,30 @@ export async function POST(request: Request) {
       } as const;
       const imageSize = sizeMap[aspect_ratio as keyof typeof sizeMap] ?? "square_hd";
 
+      console.log(`[Generate] Batch size: ${batchSize}, Style: ${style_preset}`);
+
       const result = await fal.subscribe("fal-ai/flux/schnell", {
         input: {
           prompt: fullPrompt,
           image_size: imageSize,
-          num_images: 1,
+          num_images: batchSize,
           num_inference_steps: 4,
         },
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tempImageUrl = (result.data as any).images?.[0]?.url ?? "";
+      const images: { url: string }[] = (result.data as any).images ?? [];
+      console.log(`[Generate] Received ${images.length} image(s) from fal.ai`);
 
-      // Persist generated image to Supabase Storage
-      const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, generation.id);
+      // Persist all images and build outputAssets
+      for (let i = 0; i < images.length; i++) {
+        const tempImageUrl = images[i].url;
+        const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, `${generation.id}_${i}`);
+        const title = images.length > 1 ? `Generated Image ${i + 1}` : "Generated Image";
+        outputAssets.push({ title, kind: "image", preview: imageUrl, prompt: enhancedPrompt });
+      }
 
-      outputAssets = [{ title: "Generated Image", kind: "image", preview: imageUrl, prompt: enhancedPrompt }];
+      console.log(`[Generate] Persisted ${outputAssets.length} image(s)`);
 
     } else if (mode === "image-to-image") {
       if (!images || images.length === 0) {

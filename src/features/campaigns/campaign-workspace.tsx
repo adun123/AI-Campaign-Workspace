@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, ChevronDown, ChevronUp, Copy, Cpu, DollarSign, FileText, Image, ImagePlus, Plus, RefreshCw, Send, Sparkles, Trash2, Type, User, WandSparkles, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronUp, Copy, Cpu, DollarSign, FileText, Image, ImagePlus, Layers, Palette, Plus, RefreshCw, Send, Sparkles, Trash2, Type, User, WandSparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import { generateAssets, deleteGeneration } from "@/services/ai.service";
 import { saveAsset } from "@/services/asset.service";
 import { scheduleAsset } from "@/services/scheduler.service";
 import { createCampaign } from "@/services/campaign.service";
-import { useChatStore, aiModels, type ChatMessage } from "@/stores/chat-store";
+import { useChatStore, aiModels, stylePresets, type ChatMessage } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useTrendBriefStore } from "@/stores/trend-brief-store";
 import type { Asset, AIGeneration, CampaignChannel, GenerationMode } from "@/types/domain";
@@ -49,12 +49,28 @@ function calculateCost(generationMode: GenerationMode, aspectRatio: string, numI
 
 export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) {
   const queryClient = useQueryClient();
-  const campaignByIdQuery = useCampaignByIdQuery(campaignId);
+  const pinnedTrend = useTrendBriefStore((s) => s.pinnedTrend);
+  const targetCampaignId = useTrendBriefStore((s) => s.targetCampaignId);
+  const clearTargetCampaign = useTrendBriefStore((s) => s.clearTargetCampaign);
+  const dismissTrend = useTrendBriefStore((s) => s.dismissTrend);
+  const generatePromptFromTrend = useTrendBriefStore((s) => s.generatePromptFromTrend);
+  
+  // Determine effective campaign ID: prop > store > auto
+  const effectiveCampaignId = campaignId || targetCampaignId || undefined;
+  
+  const campaignByIdQuery = useCampaignByIdQuery(effectiveCampaignId);
   const activeCampaignQuery = useActiveCampaignQuery();
-  const campaignQuery = campaignId ? campaignByIdQuery : activeCampaignQuery;
+  const campaignQuery = effectiveCampaignId ? campaignByIdQuery : activeCampaignQuery;
   const campaign = campaignQuery.data;
   const generationsQuery = useGenerationsQuery(campaign?.id);
   const history = useMemo(() => generationsQuery.data ?? [], [generationsQuery.data]);
+
+  // Clear target campaign from store once campaign is loaded
+  useEffect(() => {
+    if (campaign?.id && targetCampaignId) {
+      clearTargetCampaign();
+    }
+  }, [campaign?.id, targetCampaignId, clearTargetCampaign]);
 
   // Brand kit query - get active brand kit for this workspace
   const brandKitQuery = useActiveBrandKitQuery(campaign?.workspaceId);
@@ -73,11 +89,12 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
   const removeImage = useChatStore((s) => s.removeImage);
   const clearImages = useChatStore((s) => s.clearImages);
   const aspectRatio = useChatStore((s) => s.aspectRatio);
+  const batchCount = useChatStore((s) => s.batchCount);
+  const setBatchCount = useChatStore((s) => s.setBatchCount);
+  const stylePreset = useChatStore((s) => s.stylePreset);
+  const setStylePreset = useChatStore((s) => s.setStylePreset);
 
   const addToast = useToastStore((s) => s.addToast);
-  const pinnedTrend = useTrendBriefStore((s) => s.pinnedTrend);
-  const dismissTrend = useTrendBriefStore((s) => s.dismissTrend);
-  const generatePromptFromTrend = useTrendBriefStore((s) => s.generatePromptFromTrend);
 
   const [input, setInput] = useState("");
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -105,7 +122,7 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
       if (mode === "image-to-image" && imageFiles.length > 0) {
         images = await Promise.all(imageFiles.map((file) => fileToDataURI(file)));
       }
-      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio });
+      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio, batchCount, stylePreset });
     },
     onSuccess: (generation) => {
       const enhancedPrompt = (generation as { enhancedPrompt?: string }).enhancedPrompt;
@@ -440,6 +457,34 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
 
             <div className="h-5 w-px bg-border" />
 
+            {/* Batch size selector */}
+            <div className="flex items-center rounded-control border bg-surface-muted p-0.5">
+              {([1, 2, 4] as const).map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  onClick={() => setBatchCount(count)}
+                  title={`Generate ${count} image${count > 1 ? "s" : ""} per request`}
+                  aria-label={`Batch ${count}`}
+                  className={`flex items-center gap-1 rounded-control px-2 py-1.5 text-xs font-medium transition ${
+                    batchCount === count
+                      ? "bg-primary/15 text-primary-soft shadow-sm"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  <Layers className="h-3 w-3" />
+                  <span>{count}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="h-5 w-px bg-border" />
+
+            {/* Style preset selector */}
+            <StyleSelector />
+
+            <div className="h-5 w-px bg-border" />
+
             {/* Prompt suggestions */}
             <div className="relative">
               <button
@@ -508,10 +553,10 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
                 <DollarSign className="h-3 w-3" />
-                <span>~${calculateCost(mode, aspectRatio, attachedImages.length || 1).toFixed(3)}</span>
+                <span>~${(calculateCost(mode, aspectRatio, attachedImages.length || 1) * batchCount).toFixed(3)}</span>
               </div>
               <span className="hidden sm:inline text-xs text-text-muted/60 shrink-0">
-                {mode === "text-to-image" ? "Flux Schnell" : attachedImages.length > 1 ? `Flux Kontext Multi (${attachedImages.length} images)` : "Flux Kontext Pro"}
+                {batchCount > 1 ? `${batchCount} images` : mode === "text-to-image" ? "1 image" : attachedImages.length > 1 ? `Multi (${attachedImages.length} images)` : "1 image"}
               </span>
               {input.length > 0 && (
                 <span className="hidden sm:inline text-xs text-text-muted shrink-0">
@@ -654,7 +699,7 @@ function MessageBubble({ message, onSave, onSchedule, onEditComplete, busy }: { 
           )}
         </div>
         {message.assets && message.assets.length > 0 && (
-          <div className={`grid gap-3 ${message.assets.length === 1 ? "grid-cols-1 max-w-md" : message.assets.length === 2 ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-3"}`}>
+          <div className={`grid gap-3 ${message.assets.length === 1 ? "grid-cols-1 max-w-md" : message.assets.length === 2 ? "grid-cols-2 max-w-2xl" : "grid-cols-2 lg:grid-cols-2"}`}>
             {message.assets.map((asset) => (
               <div key={asset.id}>
                 <WorkspaceAssetCard asset={asset} onSave={onSave} onSchedule={onSchedule} onEditComplete={onEditComplete} busy={busy} />
@@ -740,6 +785,42 @@ function AspectRatioSelector() {
               <button key={ar.id} type="button" onClick={() => { setAspectRatio(ar.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-control px-3 py-2 text-xs transition ${aspectRatio === ar.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"}`}>
                 <span className="inline-block h-4 w-3 rounded-sm border border-current" style={{ aspectRatio: ar.id.replace(":", "/") }} />
                 <span>{ar.desc}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StyleSelector() {
+  const [open, setOpen] = useState(false);
+  const stylePreset = useChatStore((s) => s.stylePreset);
+  const setStylePreset = useChatStore((s) => s.setStylePreset);
+  const current = stylePresets.find((s) => s.id === stylePreset) ?? stylePresets[0];
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(!open)} title={`Style: ${current.label}`} className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary">
+        <Palette className="h-3.5 w-3.5" />
+        <span>{current.label}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 z-50 mb-2 w-56 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
+            {stylePresets.map((style) => (
+              <button
+                key={style.id}
+                type="button"
+                onClick={() => { setStylePreset(style.id); setOpen(false); }}
+                className={`flex w-full flex-col gap-0.5 rounded-control px-3 py-2 text-left transition ${
+                  stylePreset === style.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+                }`}
+              >
+                <span className="text-xs font-medium">{style.label}</span>
+                <span className="text-[10px] opacity-70">{style.description}</span>
               </button>
             ))}
           </div>
