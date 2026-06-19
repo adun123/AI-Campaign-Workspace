@@ -19,13 +19,8 @@ const MODEL_ENDPOINTS: Record<AIModel, string> = {
   "flux-schnell": "fal-ai/flux/schnell",
 };
 
-// Resolution to pixel mapping for Nano Banana models
-const RESOLUTION_MAP: Record<ImageResolution, { width: number; height: number }> = {
-  "0.5k": { width: 512, height: 512 },
-  "1k": { width: 1024, height: 1024 },
-  "2k": { width: 2048, height: 2048 },
-  "4k": { width: 4096, height: 4096 },
-};
+// Models that support text-to-image generation without image input
+const TEXT_TO_IMAGE_MODELS: AIModel[] = ["nano-banana-2", "flux-schnell"];
 
 // Persist a generated image URL to Supabase Storage and return the permanent URL
 async function persistGeneratedImage(tempUrl: string, campaignId: string, generationId: string): Promise<string> {
@@ -105,9 +100,7 @@ async function generateWithModel(
   console.log(`[Generate] Using model: ${model}, endpoint: ${endpoint}`);
 
   // Text-to-image models (no image input)
-  if (model === "nano-banana-2" || model === "flux-schnell") {
-    const res = RESOLUTION_MAP[resolution || "1k"];
-    
+  if (TEXT_TO_IMAGE_MODELS.includes(model)) {
     if (model === "flux-schnell") {
       // Flux Schnell - simple text-to-image
       const result = await fal.subscribe(endpoint, {
@@ -120,12 +113,11 @@ async function generateWithModel(
       });
       return (result.data as { images: { url: string }[] }).images || [];
     } else {
-      // Nano Banana 2 - high quality text-to-image
+      // Nano Banana 2 - text-to-image with resolution enum
       const result = await fal.subscribe(endpoint, {
         input: {
           prompt,
-          width: res.width,
-          height: res.height,
+          resolution: (resolution || "1k").toUpperCase(),
           num_images: numImages,
         },
       });
@@ -156,30 +148,26 @@ async function generateWithModel(
     }
   }
 
-  // Nano Banana 2 Edit
+  // Nano Banana 2 Edit - uses image_urls array, resolution enum (not width/height)
   if (model === "nano-banana-2-edit") {
-    const res = RESOLUTION_MAP[resolution || "1k"];
     const result = await fal.subscribe(endpoint, {
       input: {
         prompt,
-        image_url: uploadedUrls[0],
-        width: res.width,
-        height: res.height,
+        image_urls: uploadedUrls,
+        resolution: (resolution || "1k").toUpperCase(),
         num_images: numImages,
       },
     });
     return (result.data as { images: { url: string }[] }).images || [];
   }
 
-  // Nano Banana Pro Edit
+  // Nano Banana Pro Edit - uses image_urls array, resolution enum (not width/height)
   if (model === "nano-banana-pro-edit") {
-    const res = RESOLUTION_MAP[resolution || "1k"];
     const result = await fal.subscribe(endpoint, {
       input: {
         prompt,
-        image_url: uploadedUrls[0],
-        width: res.width,
-        height: res.height,
+        image_urls: uploadedUrls,
+        resolution: (resolution || "1k").toUpperCase(),
         num_images: numImages,
       },
     });
@@ -203,12 +191,12 @@ async function generateWithModel(
     return responseImages.map((img) => ({ url: img.url }));
   }
 
-  // Seedream v5 Lite
+  // Seedream v5 Lite - requires image_urls (array of URLs)
   if (model === "seedream-v5-lite") {
     const result = await fal.subscribe(endpoint, {
       input: {
         prompt,
-        image_url: uploadedUrls[0],
+        image_urls: uploadedUrls,
         num_images: numImages,
       },
     });
@@ -258,6 +246,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "campaign_id, mode, dan prompt wajib diisi." }, { status: 400 });
   }
 
+  // Validate mode + model compatibility (before hitting the model call)
+  if (mode === "text-to-image" && !TEXT_TO_IMAGE_MODELS.includes(model)) {
+    const editingOnly = model; // not nano-banana-2/flux-schnell => requires images
+    return NextResponse.json({
+      error: `Model "${editingOnly}" tidak mendukung text-to-image. Pilih nano-banana-2 atau flux-schnell, atau gunakan mode image-to-image.`
+    }, { status: 400 });
+  }
+
   // Validate num_images (1, 2, or 4)
   const validBatchCounts = [1, 2, 4];
   const batchSize = validBatchCounts.includes(num_images) ? num_images : 1;
@@ -273,10 +269,10 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
-  // Ambil brand kit
+  // Ambil brand kit (all fields for toggle-aware prompt building)
   const { data: brandKit } = await supabase
     .from("brand_kits")
-    .select("voice, colors, guardrails")
+    .select("voice, colors, guardrails, typography, brand_values, voice_enabled, colors_enabled, guardrails_enabled, typography_enabled, brand_values_enabled, logo_enabled, logo_url, logo_position, logo_size_percent")
     .eq("workspace_id", workspaceId)
     .single();
 
@@ -293,9 +289,26 @@ export async function POST(request: Request) {
     let outputAssets: { title: string; kind: string; preview: string; prompt: string }[] = [];
 
     if (mode === "text-to-image") {
-      const brandContext = brandKit
-        ? `Style: ${brandKit.voice ?? "professional"}. Colors: ${brandKit.colors?.join(", ") ?? "brand colors"}. ${brandKit.guardrails?.length ? `Avoid: ${brandKit.guardrails.join(", ")}.` : ""}`
-        : "";
+      // Build brand context respecting toggle states
+      const parts: string[] = [];
+      if (brandKit) {
+        if (brandKit.voice_enabled && brandKit.voice) {
+          parts.push(`Style: ${brandKit.voice}`);
+        }
+        if (brandKit.colors_enabled && brandKit.colors?.length) {
+          parts.push(`Colors: ${brandKit.colors.join(", ")}`);
+        }
+        if (brandKit.guardrails_enabled && brandKit.guardrails?.length) {
+          parts.push(`Avoid: ${brandKit.guardrails.join(", ")}`);
+        }
+        if (brandKit.typography_enabled && brandKit.typography) {
+          parts.push(`Typography style: ${brandKit.typography}`);
+        }
+        if (brandKit.brand_values_enabled && brandKit.brand_values?.length) {
+          parts.push(`Brand feeling: ${brandKit.brand_values.join(", ")}`);
+        }
+      }
+      const brandContext = parts.join(". ");
 
       // Enhance prompt dengan Gemini (gratis) untuk hasil image generation yang lebih baik
       console.log("[Enhance] Original prompt:", prompt);
@@ -427,25 +440,55 @@ export async function POST(request: Request) {
       .eq("id", generation.id);
 
     // Return enhanced prompt di response agar user tahu prompt yang dipakai AI
+    // Also return brand kit logo info so frontend can apply overlay
     const responsePrompt = outputAssets[0]?.prompt || prompt;
+    const logoOverlay = brandKit?.logo_enabled && brandKit?.logo_url
+      ? {
+          logoUrl: brandKit.logo_url,
+          position: brandKit.logo_position ?? "bottom-right",
+          sizePercent: brandKit.logo_size_percent ?? 15,
+        }
+      : undefined;
+
     return NextResponse.json({ 
       generation: { 
         ...generation, 
         status: "completed", 
         outputAssets: assets,
-        enhancedPrompt: mode === "text-to-image" ? responsePrompt : undefined 
+        enhancedPrompt: mode === "text-to-image" ? responsePrompt : undefined,
+        logoOverlay,
       } 
     }, { status: 201 });
 
   } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error("Generate error:", errorMessage);
+    // Extract detailed error info from fal.ai / generic errors
+    let errorMessage = "Unknown generation error";
+    let errorDetail = "";
+
+    if (err instanceof Error) {
+      errorMessage = err.message;
+      // fal.ai errors often have response body details
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errAny = err as any;
+      if (errAny?.response?.data) {
+        errorDetail = typeof errAny.response.data === "string"
+          ? errAny.response.data
+          : JSON.stringify(errAny.response.data);
+      } else if (errAny?.cause?.message) {
+        errorDetail = errAny.cause.message;
+      }
+    } else {
+      errorMessage = String(err);
+    }
+
+    const fullError = errorDetail ? `${errorMessage}: ${errorDetail}` : errorMessage;
+    console.error("Generate error:", fullError);
 
     await supabase
       .from("ai_generations")
-      .update({ status: "error", error_message: errorMessage })
+      .update({ status: "error", error_message: fullError })
       .eq("id", generation.id);
 
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ error: fullError }, { status: 500 });
   }
 }
