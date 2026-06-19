@@ -217,8 +217,6 @@ export function TrendDiscoveryView() {
                     </div>
                     <Badge tone={config.tone}><Icon className="mr-1 h-3 w-3" />{config.label}</Badge>
                   </div>
-                    <Badge tone={config.tone}><Icon className="mr-1 h-3 w-3" />{config.label}</Badge>
-                  </div>
                   <h3 className="mb-3 flex-1 text-base font-semibold leading-6 text-text-primary">
                     {trend.title}
                   </h3>
