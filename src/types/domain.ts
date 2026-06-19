@@ -29,6 +29,15 @@ export type Campaign = {
   createdAt: string;
 };
 
+export type LogoPosition =
+  | "top-left"
+  | "top-center"
+  | "top-right"
+  | "center"
+  | "bottom-left"
+  | "bottom-center"
+  | "bottom-right";
+
 export type BrandKit = {
   id: ID;
   workspaceId: ID;
@@ -37,6 +46,19 @@ export type BrandKit = {
   colors: string[];
   logoUrl: string;
   guardrails: string[];
+  // Logo overlay
+  logoEnabled: boolean;
+  logoPosition: LogoPosition;
+  logoSizePercent: number;
+  // Toggles
+  voiceEnabled: boolean;
+  colorsEnabled: boolean;
+  guardrailsEnabled: boolean;
+  // New fields
+  typography: string;
+  typographyEnabled: boolean;
+  brandValues: string[];
+  brandValuesEnabled: boolean;
 };
 
 export type GenerationMode = "text-to-image" | "image-to-image";
