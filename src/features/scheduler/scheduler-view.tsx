@@ -201,7 +201,7 @@ export function SchedulerView() {
   }
 
   return (
-    <section className="space-y-5">
+    <section className="min-w-0 overflow-hidden space-y-5">
       <SectionHeading eyebrow="Scheduler" title="Publishing queue" />
 
       {/* Stats */}
@@ -211,9 +211,9 @@ export function SchedulerView() {
         <StatCard label="Published" value={posts.filter((p) => p.status === "published").length} icon={CheckCircle} />
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[320px_1fr] xl:grid-cols-[380px_1fr]">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[320px_1fr] xl:grid-cols-[380px_1fr]">
         {/* Create form */}
-        <Card className="h-fit">
+        <Card className="h-fit overflow-hidden">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2">
               <Plus className="h-4 w-4 text-accent" />
@@ -295,22 +295,22 @@ export function SchedulerView() {
 
                 {/* Date & Time */}
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
+                  <div className="min-w-0 space-y-2">
                     <label className="text-sm font-medium text-text-muted">Date</label>
                     <input
                       type="date"
-                      className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+                      className="h-10 w-full min-w-0 rounded-control border bg-surface-muted px-2 text-sm text-text-primary outline-none focus:border-accent/60"
                       {...form.register("date")}
                     />
                     {form.formState.errors.date && (
                       <p className="text-xs text-error">{form.formState.errors.date.message}</p>
                     )}
                   </div>
-                  <div className="space-y-2">
+                  <div className="min-w-0 space-y-2">
                     <label className="text-sm font-medium text-text-muted">Time</label>
                     <input
                       type="time"
-                      className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60"
+                      className="h-10 w-full min-w-0 rounded-control border bg-surface-muted px-2 text-sm text-text-primary outline-none focus:border-accent/60"
                       {...form.register("time")}
                     />
                     {form.formState.errors.time && (
@@ -339,7 +339,7 @@ export function SchedulerView() {
         </Card>
 
         {/* Scheduled posts list */}
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           {/* Filters */}
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
             <FilterPill label="All" active={statusFilter === "all"} onClick={() => setStatusFilter("all")} />
@@ -456,7 +456,7 @@ function ScheduleCard({
   };
 
   return (
-    <Card className="group transition hover:border-accent/30">
+    <Card className="group overflow-hidden transition hover:border-accent/30">
       <div className="flex items-start gap-3 p-3 sm:items-center">
         {/* Thumbnail */}
         <div className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 overflow-hidden rounded-control bg-surface-muted">
