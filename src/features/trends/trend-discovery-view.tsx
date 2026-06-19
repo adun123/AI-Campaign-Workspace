@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Flame, Rocket, Share2, Sparkles, TrendingUp } from "lucide-react";
+import { Copy, Flame, Loader2, Rocket, Share2, Sparkles, TrendingUp } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +27,7 @@ export function TrendDiscoveryView() {
   const [niches, setNiches] = useState<TrendNiche[]>([]);
   const [results, setResults] = useState<Trend[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function toggleNiche(niche: TrendNiche) {
     setNiches((prev) => (prev.includes(niche) ? prev.filter((n) => n !== niche) : [...prev, niche]));
@@ -34,9 +35,20 @@ export function TrendDiscoveryView() {
 
   async function handleDiscover() {
     setLoading(true);
-    const data = await discoverTrends({ platform: platform || undefined, niches });
-    setResults(data);
-    setLoading(false);
+    setError(null);
+    try {
+      const data = await discoverTrends({ platform: platform || undefined, niches });
+      setResults(data);
+      if (data.length === 0) {
+        addToast("info", "No trends found for your filters. Try different combinations.");
+      }
+    } catch (err) {
+      console.error("[Trend Discovery] Error:", err);
+      setError("Failed to fetch trends. Please try again.");
+      addToast("error", "Failed to fetch trends");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleUseAsBrief(trend: Trend) {
@@ -89,10 +101,36 @@ export function TrendDiscoveryView() {
           </div>
 
           <Button onClick={handleDiscover} disabled={loading}>
-            <TrendingUp className="h-4 w-4" /> {loading ? "Discovering..." : "Discover Trends"}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+            {loading ? "Discovering..." : "Discover Trends"}
           </Button>
+
+          {error && (
+            <p className="text-sm text-error">{error}</p>
+          )}
         </CardContent>
       </Card>
+
+      {/* Loading State */}
+      {loading && (
+        <div className="flex items-center justify-center gap-2 rounded-card border border-dashed border-border p-8 text-text-muted">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Fetching trending content...</span>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {results.length === 0 && !loading && (
+        <div className="flex flex-col items-center justify-center gap-2 rounded-card border border-dashed border-border p-8 text-center">
+          <TrendingUp className="h-6 w-6 text-text-muted" />
+          <p className="text-sm text-text-muted">
+            {error 
+              ? "Something went wrong. Please try again."
+              : "Select filters and click \u201CDiscover Trends\u201D to see what\u2019s viral."
+            }
+          </p>
+        </div>
+      )}
 
       {results.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -143,10 +181,6 @@ export function TrendDiscoveryView() {
             );
           })}
         </div>
-      )}
-
-      {results.length === 0 && !loading && (
-        <p className="text-sm text-text-muted">Select filters and click &quot;Discover Trends&quot; to see what&apos;s viral.</p>
       )}
     </section>
   );

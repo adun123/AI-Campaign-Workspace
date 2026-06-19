@@ -1,5 +1,4 @@
-import { trends, type Trend, type TrendNiche, type TrendPlatform } from "@/lib/trend-data";
-import { waitForMock } from "@/services/mock-runtime";
+import type { Trend, TrendNiche, TrendPlatform } from "@/lib/trend-data";
 
 export type TrendFilter = {
   platform?: TrendPlatform;
@@ -7,10 +6,20 @@ export type TrendFilter = {
 };
 
 export async function discoverTrends(filter: TrendFilter): Promise<Trend[]> {
-  await waitForMock(400);
-  return trends.filter((t) => {
-    if (filter.platform && t.platform !== filter.platform) return false;
-    if (filter.niches.length > 0 && !filter.niches.includes(t.niche)) return false;
-    return true;
+  const res = await fetch("/api/trends/discover", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      platform: filter.platform || null,
+      niches: filter.niches,
+    }),
   });
+
+  if (!res.ok) {
+    console.error("[Trend Service] API error:", res.status);
+    throw new Error("Failed to fetch trends");
+  }
+
+  const data = await res.json();
+  return data.trends || [];
 }
