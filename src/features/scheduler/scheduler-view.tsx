@@ -206,12 +206,12 @@ export function SchedulerView() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
-        <StatCard label="Total Scheduled" value={posts.filter((p) => p.status === "scheduled").length} icon={CalendarClock} />
+        <StatCard label="Scheduled" value={posts.filter((p) => p.status === "scheduled").length} icon={CalendarClock} />
         <StatCard label="Drafts" value={posts.filter((p) => p.status === "draft").length} icon={Clock} />
         <StatCard label="Published" value={posts.filter((p) => p.status === "published").length} icon={CheckCircle} />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[380px_1fr]">
+      <div className="grid gap-5 lg:grid-cols-[320px_1fr] xl:grid-cols-[380px_1fr]">
         {/* Create form */}
         <Card className="h-fit">
           <CardHeader className="pb-4">
@@ -411,8 +411,8 @@ function StatCard({ label, value, icon: Icon }: { label: string; value: number; 
   return (
     <Card className="p-3 sm:p-4">
       <div className="flex items-center gap-1.5 sm:gap-2">
-        <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-accent" />
-        <span className="text-[10px] sm:text-xs font-medium text-text-muted leading-tight">{label}</span>
+        <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-accent" />
+        <span className="truncate text-[10px] sm:text-xs font-medium text-text-muted leading-tight">{label}</span>
       </div>
       <p className="mt-1.5 sm:mt-2 text-xl sm:text-2xl font-semibold text-text-primary">{value}</p>
     </Card>
@@ -720,7 +720,7 @@ function FilterPill({ label, active, onClick }: { label: string; active: boolean
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+      className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition ${
         active
           ? "border-accent bg-accent/10 text-text-primary"
           : "border-border bg-surface-muted text-text-muted hover:bg-surface-elevated"
