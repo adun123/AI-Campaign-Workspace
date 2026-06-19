@@ -38,6 +38,16 @@ export const brandKits: BrandKit[] = [
     colors: ["#0A0A0B", "#111214", "#7C3AED", "#60A5FA", "#F5F7FA"],
     logoUrl: "KV",
     guardrails: ["No cartoon robots", "Prefer product context over abstract magic", "Keep copy under 24 words per frame"],
+    logoEnabled: false,
+    logoPosition: "bottom-right",
+    logoSizePercent: 15,
+    voiceEnabled: true,
+    colorsEnabled: true,
+    guardrailsEnabled: true,
+    typography: "",
+    typographyEnabled: false,
+    brandValues: [],
+    brandValuesEnabled: false,
   },
 ];
 
