@@ -3,6 +3,14 @@ import { getWorkspaceId } from "@/lib/get-workspace-id";
 import fal from "@/lib/fal-ai";
 import { NextResponse } from "next/server";
 
+function dataURLtoFile(dataurl: string, filename: string): File {
+  const arr = dataurl.split(",");
+  const mime = arr[0].match(/:(.*?);/)?.[1] ?? "image/png";
+  const base64Data = arr[1];
+  const buffer = Buffer.from(base64Data, "base64");
+  return new File([buffer], filename, { type: mime });
+}
+
 export async function POST(request: Request) {
   const workspaceId = await getWorkspaceId();
   if (!workspaceId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -19,12 +27,16 @@ export async function POST(request: Request) {
   });
 
   const { source_image, instruction } = body;
-  if (!source_image || !instruction) {
+  const hasMask = body.mask && typeof body.mask === "string" && body.mask.startsWith("data:image/");
+  
+  // Need either instruction or mask (or both)
+  if (!source_image || (!instruction && !hasMask)) {
     return NextResponse.json({ 
-      error: "Missing required fields",
+      error: "Missing required fields: need source_image and at least one of (instruction or mask)",
       details: { 
         has_source_image: !!source_image, 
         has_instruction: !!instruction,
+        has_mask: hasMask,
       }
     }, { status: 400 });
   }
@@ -51,23 +63,59 @@ export async function POST(request: Request) {
     }
 
     // Create generation record
+    const editPrompt = instruction || "Regenerate the masked area";
     const { data: generation, error: genError } = await supabase
       .from("ai_generations")
-      .insert({ campaign_id: campaignId, mode: "image-to-image", prompt: `✏️ Edit: ${instruction}`, status: "processing" })
+      .insert({ campaign_id: campaignId, mode: "image-to-image", prompt: `✏️ Edit: ${editPrompt}`, status: "processing" })
       .select()
       .single();
 
     if (genError) return NextResponse.json({ error: genError.message }, { status: 500 });
 
-    const result = await fal.subscribe("fal-ai/flux-pro/kontext", {
-      input: {
-        prompt: `Edit this image: ${instruction}. Preserve the original image structure and composition. Only apply the specific edit requested.`,
-        image_url: source_image,
-        num_images: 1,
-      },
-    });
+    // Upload source image to fal storage
+    let imageUrl: string;
+    if (source_image.startsWith("data:image/")) {
+      const imageFile = dataURLtoFile(source_image, "source.png");
+      imageUrl = await fal.storage.upload(imageFile);
+    } else {
+      imageUrl = source_image;
+    }
 
-    const editedUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
+    // Determine edit mode: masked inpainting vs instruction-only
+    let editedUrl: string;
+
+    if (hasMask) {
+      // Masked inpainting mode: upload mask and use flux-general/inpainting
+      console.log("[Edit] Using masked inpainting with flux-general/inpainting");
+      const maskFile = dataURLtoFile(body.mask, "mask.png");
+      const maskUrl = await fal.storage.upload(maskFile);
+
+      const result = await fal.subscribe("fal-ai/flux-general/inpainting", {
+        input: {
+          prompt: editPrompt,
+          image_url: imageUrl,
+          mask_url: maskUrl,
+          strength: 0.85,
+          num_images: 1,
+          num_inference_steps: 30,
+        },
+      });
+
+      editedUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
+    } else {
+      // Instruction-only mode: use nano-banana-2/edit
+      console.log("[Edit] Using instruction-only editing with nano-banana-2/edit");
+      const result = await fal.subscribe("fal-ai/nano-banana-2/edit", {
+        input: {
+          prompt: editPrompt,
+          image_urls: [imageUrl],
+          resolution: "1K",
+          num_images: 1,
+        },
+      });
+
+      editedUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
+    }
 
     if (!editedUrl) {
       await supabase.from("ai_generations").update({ status: "error", error_message: "AI did not return an edited image" }).eq("id", generation.id);
@@ -77,7 +125,7 @@ export async function POST(request: Request) {
     // Create new asset
     const { data: asset, error } = await supabase
       .from("assets")
-      .insert({ campaign_id: campaignId, title: "Edited Image", kind: "image", preview: editedUrl, prompt: instruction, channel: "Instagram", status: "draft" })
+      .insert({ campaign_id: campaignId, title: "Edited Image", kind: "image", preview: editedUrl, prompt: editPrompt, channel: "Instagram", status: "draft" })
       .select()
       .single();
 

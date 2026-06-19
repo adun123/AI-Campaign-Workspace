@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, ChevronDown, ChevronUp, Copy, Cpu, DollarSign, FileText, Image, ImagePlus, Plus, RefreshCw, Send, Sparkles, Trash2, Type, User, WandSparkles, X } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronUp, Copy, Cpu, DollarSign, FileText, Image, ImagePlus, Layers, Palette, Plus, RefreshCw, Send, Sparkles, Trash2, Type, User, WandSparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -14,10 +15,10 @@ import { generateAssets, deleteGeneration } from "@/services/ai.service";
 import { saveAsset } from "@/services/asset.service";
 import { scheduleAsset } from "@/services/scheduler.service";
 import { createCampaign } from "@/services/campaign.service";
-import { useChatStore, aiModels, type ChatMessage } from "@/stores/chat-store";
+import { useChatStore, aiModels, stylePresets, type ChatMessage, type ImageResolution, type ImageQuality } from "@/stores/chat-store";
 import { useToastStore } from "@/stores/toast-store";
 import { useTrendBriefStore } from "@/stores/trend-brief-store";
-import type { Asset, AIGeneration, CampaignChannel, GenerationMode } from "@/types/domain";
+import type { Asset, AIGeneration, CampaignChannel, GenerationMode, LogoPosition } from "@/types/domain";
 
 function fileToDataURI(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -37,24 +38,43 @@ const PROMPT_SUGGESTIONS = [
   { label: "Promotional Poster", prompt: "Promotional poster design with clear call-to-action" },
 ];
 
-function calculateCost(generationMode: GenerationMode, aspectRatio: string, numImages: number = 1): number {
+function calculateCost(generationMode: GenerationMode, aspectRatio: string, numImages: number = 1, modelId: string = "nano-banana-2"): number {
+  const model = aiModels.find((m) => m.id === modelId);
+  const basePrice = model?.pricePerImage ?? 0.003;
+  
   if (generationMode === "text-to-image") {
     const aspectMultiplier = aspectRatio === "16:9" || aspectRatio === "9:16" ? 1.2 : 1.0;
-    return 0.003 * aspectMultiplier;
+    return basePrice * aspectMultiplier;
   }
-  // Image-to-image: Flux Kontext Pro $0.04/image, multi charges per input image
+  // Image-to-image
   const aspectMultiplier = aspectRatio === "16:9" || aspectRatio === "9:16" ? 1.2 : 1.0;
-  return 0.04 * numImages * aspectMultiplier;
+  return basePrice * numImages * aspectMultiplier;
 }
 
 export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) {
   const queryClient = useQueryClient();
-  const campaignByIdQuery = useCampaignByIdQuery(campaignId);
+  const pinnedTrend = useTrendBriefStore((s) => s.pinnedTrend);
+  const targetCampaignId = useTrendBriefStore((s) => s.targetCampaignId);
+  const clearTargetCampaign = useTrendBriefStore((s) => s.clearTargetCampaign);
+  const dismissTrend = useTrendBriefStore((s) => s.dismissTrend);
+  const generatePromptFromTrend = useTrendBriefStore((s) => s.generatePromptFromTrend);
+  
+  // Determine effective campaign ID: prop > store > auto
+  const effectiveCampaignId = campaignId || targetCampaignId || undefined;
+  
+  const campaignByIdQuery = useCampaignByIdQuery(effectiveCampaignId);
   const activeCampaignQuery = useActiveCampaignQuery();
-  const campaignQuery = campaignId ? campaignByIdQuery : activeCampaignQuery;
+  const campaignQuery = effectiveCampaignId ? campaignByIdQuery : activeCampaignQuery;
   const campaign = campaignQuery.data;
   const generationsQuery = useGenerationsQuery(campaign?.id);
   const history = useMemo(() => generationsQuery.data ?? [], [generationsQuery.data]);
+
+  // Clear target campaign from store once campaign is loaded
+  useEffect(() => {
+    if (campaign?.id && targetCampaignId) {
+      clearTargetCampaign();
+    }
+  }, [campaign?.id, targetCampaignId, clearTargetCampaign]);
 
   // Brand kit query - get active brand kit for this workspace
   const brandKitQuery = useActiveBrandKitQuery(campaign?.workspaceId);
@@ -73,11 +93,16 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
   const removeImage = useChatStore((s) => s.removeImage);
   const clearImages = useChatStore((s) => s.clearImages);
   const aspectRatio = useChatStore((s) => s.aspectRatio);
+  const batchCount = useChatStore((s) => s.batchCount);
+  const setBatchCount = useChatStore((s) => s.setBatchCount);
+  const stylePreset = useChatStore((s) => s.stylePreset);
+  const setStylePreset = useChatStore((s) => s.setStylePreset);
+  const resolution = useChatStore((s) => s.resolution);
+  const setResolution = useChatStore((s) => s.setResolution);
+  const quality = useChatStore((s) => s.quality);
+  const setQuality = useChatStore((s) => s.setQuality);
 
   const addToast = useToastStore((s) => s.addToast);
-  const pinnedTrend = useTrendBriefStore((s) => s.pinnedTrend);
-  const dismissTrend = useTrendBriefStore((s) => s.dismissTrend);
-  const generatePromptFromTrend = useTrendBriefStore((s) => s.generatePromptFromTrend);
 
   const [input, setInput] = useState("");
   const [showModelPicker, setShowModelPicker] = useState(false);
@@ -86,6 +111,8 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const suggestionsBtnRef = useRef<HTMLButtonElement | null>(null);
+  const modelBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // Set active campaign in chat store when campaign changes
   useEffect(() => {
@@ -93,6 +120,20 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
       setCampaign(campaign.id);
     }
   }, [campaign?.id, setCampaign]);
+
+  // Auto-switch model when mode changes to an incompatible combination:
+  // text-to-image needs a non-editing model (nano-banana-2 / flux-schnell),
+  // image-to-image needs a model with acceptsImages.
+  useEffect(() => {
+    const current = aiModels.find((m) => m.id === model);
+    if (!current) return;
+
+    if (mode === "text-to-image" && current.acceptsImages) {
+      setModel("nano-banana-2");
+    } else if (mode === "image-to-image" && !current.acceptsImages) {
+      setModel("nano-banana-2-edit");
+    }
+  }, [mode, model, setModel]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -105,7 +146,7 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
       if (mode === "image-to-image" && imageFiles.length > 0) {
         images = await Promise.all(imageFiles.map((file) => fileToDataURI(file)));
       }
-      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio });
+      return generateAssets({ campaignId: campaign.id, mode, prompt, images, aspectRatio, batchCount, stylePreset, model, resolution, quality });
     },
     onSuccess: (generation) => {
       const enhancedPrompt = (generation as { enhancedPrompt?: string }).enhancedPrompt;
@@ -375,7 +416,19 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
       <div className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="space-y-4 pb-4">
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} onSave={(a) => saveMutation.mutate(a)} onSchedule={(a) => scheduleMutation.mutate(a)} onEditComplete={handleEditComplete} busy={saveMutation.isPending || scheduleMutation.isPending} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              logoOverlay={brandKit?.logoEnabled && brandKit?.logoUrl ? {
+                logoUrl: brandKit.logoUrl,
+                position: brandKit.logoPosition ?? "bottom-right",
+                sizePercent: brandKit.logoSizePercent ?? 15,
+              } : undefined}
+              onSave={(a) => saveMutation.mutate(a)}
+              onSchedule={(a) => scheduleMutation.mutate(a)}
+              onEditComplete={handleEditComplete}
+              busy={saveMutation.isPending || scheduleMutation.isPending}
+            />
           ))}
           <div ref={chatEndRef} />
         </div>
@@ -440,9 +493,72 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
 
             <div className="h-5 w-px bg-border" />
 
+            {/* Batch size selector */}
+            <div className="flex items-center rounded-control border bg-surface-muted p-0.5">
+              {([1, 2, 4] as const).map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  onClick={() => setBatchCount(count)}
+                  title={`Generate ${count} image${count > 1 ? "s" : ""} per request`}
+                  aria-label={`Batch ${count}`}
+                  className={`flex items-center gap-1 rounded-control px-2 py-1.5 text-xs font-medium transition ${
+                    batchCount === count
+                      ? "bg-primary/15 text-primary-soft shadow-sm"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  <Layers className="h-3 w-3" />
+                  <span>{count}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="h-5 w-px bg-border" />
+
+            {/* Style preset selector */}
+            <StyleSelector />
+
+            <div className="h-5 w-px bg-border" />
+
+            {/* Resolution selector - only for models that support it */}
+            {(() => {
+              const currentModel = aiModels.find((m) => m.id === model);
+              if (!currentModel?.resolutions) return null;
+              
+              return (
+                <>
+                  <ResolutionSelector 
+                    resolutions={currentModel.resolutions}
+                    selected={resolution}
+                    onChange={setResolution}
+                  />
+                  <div className="h-5 w-px bg-border" />
+                </>
+              );
+            })()}
+
+            {/* Quality selector - only for models that support it */}
+            {(() => {
+              const currentModel = aiModels.find((m) => m.id === model);
+              if (!currentModel?.qualityLevels) return null;
+              
+              return (
+                <>
+                  <QualitySelector 
+                    levels={currentModel.qualityLevels}
+                    selected={quality}
+                    onChange={setQuality}
+                  />
+                  <div className="h-5 w-px bg-border" />
+                </>
+              );
+            })()}
+
             {/* Prompt suggestions */}
             <div className="relative">
               <button
+                ref={suggestionsBtnRef}
                 type="button"
                 onClick={() => setShowSuggestions(!showSuggestions)}
                 title="Prompt suggestions"
@@ -452,28 +568,23 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
                 <Sparkles className="h-3.5 w-3.5" />
                 <span>Suggestions</span>
               </button>
-              {showSuggestions && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowSuggestions(false)} />
-                  <div className="absolute bottom-full left-0 z-50 mb-2 w-64 rounded-card border bg-surface/95 p-2 shadow-soft backdrop-blur-xl">
-                    <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-text-muted">Quick prompts</p>
-                    {PROMPT_SUGGESTIONS.map((suggestion) => (
-                      <button
-                        key={suggestion.label}
-                        type="button"
-                        onClick={() => {
-                          setInput(suggestion.prompt);
-                          setShowSuggestions(false);
-                        }}
-                        className="flex w-full flex-col rounded-control px-3 py-2 text-left transition hover:bg-surface-elevated"
-                      >
-                        <span className="text-xs font-medium text-text-primary">{suggestion.label}</span>
-                        <span className="text-xs text-text-muted line-clamp-1">{suggestion.prompt}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+              <PopoverContent open={showSuggestions} onClose={() => setShowSuggestions(false)} buttonRef={suggestionsBtnRef} anchor="bottom-start" width={256}>
+                <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-text-muted">Quick prompts</p>
+                {PROMPT_SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion.label}
+                    type="button"
+                    onClick={() => {
+                      setInput(suggestion.prompt);
+                      setShowSuggestions(false);
+                    }}
+                    className="flex w-full flex-col rounded-control px-3 py-2 text-left transition hover:bg-surface-elevated"
+                  >
+                    <span className="text-xs font-medium text-text-primary">{suggestion.label}</span>
+                    <span className="text-xs text-text-muted line-clamp-1">{suggestion.prompt}</span>
+                  </button>
+                ))}
+              </PopoverContent>
             </div>
 
             {/* Image upload (only in image-to-image mode) */}
@@ -508,10 +619,10 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div className="flex items-center gap-1.5 text-xs text-text-muted shrink-0">
                 <DollarSign className="h-3 w-3" />
-                <span>~${calculateCost(mode, aspectRatio, attachedImages.length || 1).toFixed(3)}</span>
+                <span>~${(calculateCost(mode, aspectRatio, attachedImages.length || 1, model) * batchCount).toFixed(3)}</span>
               </div>
               <span className="hidden sm:inline text-xs text-text-muted/60 shrink-0">
-                {mode === "text-to-image" ? "Flux Schnell" : attachedImages.length > 1 ? `Flux Kontext Multi (${attachedImages.length} images)` : "Flux Kontext Pro"}
+                {aiModels.find((m) => m.id === model)?.label} • {batchCount > 1 ? `${batchCount} images` : "1 image"}
               </span>
               {input.length > 0 && (
                 <span className="hidden sm:inline text-xs text-text-muted shrink-0">
@@ -538,6 +649,7 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
               {/* Model selector */}
               <div className="relative">
                 <button
+                  ref={modelBtnRef}
                   type="button"
                   onClick={() => setShowModelPicker(!showModelPicker)}
                   title={`Model: ${aiModels.find((m) => m.id === model)?.label}`}
@@ -546,18 +658,45 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
                 >
                   <Cpu className="h-3.5 w-3.5" />
                 </button>
-                {showModelPicker && (
-                  <>
-                    <div className="fixed inset-0 z-40" onClick={() => setShowModelPicker(false)} />
-                    <div className="absolute bottom-full right-0 z-50 mb-2 w-44 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
-                      {aiModels.map((m) => (
-                        <button key={m.id} type="button" onClick={() => { setModel(m.id); setShowModelPicker(false); }} className={`flex w-full items-center rounded-control px-3 py-2 text-xs transition ${model === m.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"}`}>
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <PopoverContent open={showModelPicker} onClose={() => setShowModelPicker(false)} buttonRef={modelBtnRef} anchor="bottom-end" width={320}>
+                  <p className="mb-2 px-2 text-xs font-medium uppercase tracking-wider text-text-muted">AI Models</p>
+                  {aiModels.map((m) => {
+                    const isCompatible =
+                      (mode === "text-to-image" && !m.acceptsImages) ||
+                      (mode === "image-to-image" && m.acceptsImages);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setModel(m.id);
+                          setShowModelPicker(false);
+                        }}
+                        disabled={!isCompatible}
+                        className={`flex w-full flex-col gap-1 rounded-control px-3 py-2 text-left transition ${
+                          model === m.id
+                            ? "bg-primary/12 text-text-primary"
+                            : isCompatible
+                              ? "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+                              : "opacity-40 cursor-not-allowed text-text-muted"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium">{m.label}</span>
+                          <span className="text-[10px] opacity-70">
+                            {isCompatible ? `$${m.pricePerImage}/img` : "Not available in this mode"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] opacity-70 line-clamp-1">{m.description}</p>
+                        <div className="flex gap-1 mt-1">
+                          {m.acceptsImages && <span className="text-[9px] bg-accent/20 text-accent px-1.5 py-0.5 rounded">Edit</span>}
+                          {m.resolutions && <span className="text-[9px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">Res</span>}
+                          {m.qualityLevels && <span className="text-[9px] bg-success/20 text-success px-1.5 py-0.5 rounded">Quality</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </PopoverContent>
               </div>
 
               {/* Regenerate button */}
@@ -578,7 +717,7 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
               <Button
                 size="sm"
                 onClick={() => handleSend()}
-                disabled={!input.trim() || generateMutation.isPending}
+                disabled={!input.trim() || generateMutation.isPending || (mode === "image-to-image" && attachedImages.length === 0)}
                 className="h-8 px-3"
               >
                 {generateMutation.isPending ? (
@@ -598,10 +737,13 @@ export function CampaignWorkspace({ campaignId }: { campaignId?: string } = {}) 
   );
 }
 
-function MessageBubble({ message, onSave, onSchedule, onEditComplete, busy }: { message: ChatMessage; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void; busy: boolean }) {
+function MessageBubble({ message, logoOverlay, onSave, onSchedule, onEditComplete, busy }: { message: ChatMessage; logoOverlay?: { logoUrl: string; position: string; sizePercent: number }; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void; busy: boolean }) {
   const isUser = message.role === "user";
   const addToast = useToastStore((s) => s.addToast);
   const [copied, setCopied] = useState(false);
+  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editLoading, setEditLoading] = useState(false);
 
   // Extract enhanced prompt if present
   const enhancedPromptMatch = !isUser && message.content.match(/✨ Enhanced prompt: ([\s\S]+?)\n\nHere are the generated assets:/);
@@ -617,6 +759,38 @@ function MessageBubble({ message, onSave, onSchedule, onEditComplete, busy }: { 
       setTimeout(() => setCopied(false), 2000);
     } catch {
       addToast("error", "Failed to copy prompt");
+    }
+  }
+
+  async function handleQuickEdit(asset: Asset) {
+    if (!editInstruction.trim() || editLoading) return;
+    
+    setEditLoading(true);
+    try {
+      const res = await fetch("/api/generate/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          asset_id: asset.id,
+          campaign_id: asset.campaignId,
+          source_image: asset.preview,
+          instruction: editInstruction,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Edit failed");
+      }
+
+      const data = await res.json();
+      onEditComplete?.(editInstruction, data.asset);
+      setEditingAssetId(null);
+      setEditInstruction("");
+    } catch (err: unknown) {
+      addToast("error", err instanceof Error ? err.message : "Edit failed");
+    } finally {
+      setEditLoading(false);
     }
   }
 
@@ -654,10 +828,71 @@ function MessageBubble({ message, onSave, onSchedule, onEditComplete, busy }: { 
           )}
         </div>
         {message.assets && message.assets.length > 0 && (
-          <div className={`grid gap-3 ${message.assets.length === 1 ? "grid-cols-1 max-w-md" : message.assets.length === 2 ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-3"}`}>
+          <div className={`grid gap-3 ${message.assets.length === 1 ? "grid-cols-1 max-w-md" : message.assets.length === 2 ? "grid-cols-2 max-w-2xl" : "grid-cols-2 lg:grid-cols-2"}`}>
             {message.assets.map((asset) => (
-              <div key={asset.id}>
-                <WorkspaceAssetCard asset={asset} onSave={onSave} onSchedule={onSchedule} onEditComplete={onEditComplete} busy={busy} />
+              <div key={asset.id} className="space-y-2">
+                <WorkspaceAssetCard asset={asset} logoOverlay={logoOverlay ? { logoUrl: logoOverlay.logoUrl, position: logoOverlay.position as LogoPosition, sizePercent: logoOverlay.sizePercent } : undefined} onSave={onSave} onSchedule={onSchedule} onEditComplete={onEditComplete} busy={busy} />
+                {asset.kind === "image" && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        if (editingAssetId === asset.id) {
+                          setEditingAssetId(null);
+                          setEditInstruction("");
+                        } else {
+                          setEditingAssetId(asset.id);
+                        }
+                      }}
+                      className="h-7 px-2 text-xs flex items-center gap-1"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                      </svg>
+                      {editingAssetId === asset.id ? "Cancel" : "Edit"}
+                    </Button>
+                    {editingAssetId === asset.id && (
+                      <div className="flex-1 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={editInstruction}
+                          onChange={(e) => setEditInstruction(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              handleQuickEdit(asset);
+                            }
+                            if (e.key === "Escape") {
+                              setEditingAssetId(null);
+                              setEditInstruction("");
+                            }
+                          }}
+                          placeholder="Describe your edit..."
+                          className="flex-1 h-7 px-2 text-xs rounded border border-border bg-surface-muted focus:border-accent focus:outline-none"
+                          disabled={busy || editLoading}
+                          autoFocus
+                        />
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleQuickEdit(asset)}
+                          disabled={!editInstruction.trim() || busy || editLoading}
+                          className="h-7 px-3 text-xs"
+                        >
+                          {editLoading ? (
+                            <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                            </svg>
+                          ) : (
+                            "Apply"
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -713,6 +948,79 @@ function ExpandableHistory({ history, onSelect, onDelete }: { history: AIGenerat
   );
 }
 
+type AnchorType = "bottom-start" | "bottom-end";
+
+function usePopoverCoords(buttonRef: React.RefObject<HTMLElement | null>, anchor: AnchorType) {
+  const [coords, setCoords] = useState({ top: 0, left: 0, right: 0, width: 0 });
+
+  useEffect(() => {
+    if (!buttonRef.current) return;
+
+    function update() {
+      const rect = buttonRef.current!.getBoundingClientRect();
+      const top = rect.top - 8;
+      const set: Partial<typeof coords> = { top };
+      if (anchor === "bottom-start") {
+        set.left = rect.left;
+        set.width = rect.width;
+      } else {
+        set.right = window.innerWidth - rect.right;
+        set.width = rect.width;
+      }
+      setCoords(set as typeof coords);
+    }
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [buttonRef, anchor]);
+
+  return coords;
+}
+
+function PopoverContent({
+  open,
+  onClose,
+  buttonRef,
+  anchor,
+  width,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  buttonRef: React.RefObject<HTMLElement | null>;
+  anchor: AnchorType;
+  width: number;
+  children: React.ReactNode;
+}) {
+  const coords = usePopoverCoords(buttonRef, anchor);
+
+  if (!open) return null;
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        className="fixed z-50 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl"
+        style={{
+          top: coords.top,
+          transform: "translateY(-100%)",
+          ...(anchor === "bottom-start"
+            ? { left: coords.left, width }
+            : { right: coords.right, width }),
+        }}
+      >
+        {children}
+      </div>
+    </>,
+    document.body
+  );
+}
+
 const ASPECT_RATIOS = [
   { id: "1:1", label: "1:1", desc: "Feed Square" },
   { id: "4:5", label: "4:5", desc: "Feed Portrait" },
@@ -722,29 +1030,176 @@ const ASPECT_RATIOS = [
 
 function AspectRatioSelector() {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const aspectRatio = useChatStore((s) => s.aspectRatio);
   const setAspectRatio = useChatStore((s) => s.setAspectRatio);
   const current = ASPECT_RATIOS.find((a) => a.id === aspectRatio) ?? ASPECT_RATIOS[0];
 
   return (
     <div className="relative">
-      <button type="button" onClick={() => setOpen(!open)} title={`Size: ${current.desc}`} className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        title={`Size: ${current.desc}`}
+        className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary"
+      >
         <span className="inline-block h-4 w-3 rounded-sm border border-current" style={{ aspectRatio: current.id.replace(":", "/") }} />
         <span>{current.label}</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-0 z-50 mb-2 w-36 rounded-card border bg-surface/95 p-1.5 shadow-soft backdrop-blur-xl">
-            {ASPECT_RATIOS.map((ar) => (
-              <button key={ar.id} type="button" onClick={() => { setAspectRatio(ar.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded-control px-3 py-2 text-xs transition ${aspectRatio === ar.id ? "bg-primary/12 text-text-primary" : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"}`}>
-                <span className="inline-block h-4 w-3 rounded-sm border border-current" style={{ aspectRatio: ar.id.replace(":", "/") }} />
-                <span>{ar.desc}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+      <PopoverContent open={open} onClose={() => setOpen(false)} buttonRef={buttonRef} anchor="bottom-start" width={144}>
+        {ASPECT_RATIOS.map((ar) => (
+          <button
+            key={ar.id}
+            type="button"
+            onClick={() => {
+              setAspectRatio(ar.id);
+              setOpen(false);
+            }}
+            className={`flex w-full items-center gap-2 rounded-control px-3 py-2 text-xs transition ${
+              aspectRatio === ar.id
+                ? "bg-primary/12 text-text-primary"
+                : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+            }`}
+          >
+            <span className="inline-block h-4 w-3 rounded-sm border border-current" style={{ aspectRatio: ar.id.replace(":", "/") }} />
+            <span>{ar.desc}</span>
+          </button>
+        ))}
+      </PopoverContent>
+    </div>
+  );
+}
+
+function StyleSelector() {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const stylePreset = useChatStore((s) => s.stylePreset);
+  const setStylePreset = useChatStore((s) => s.setStylePreset);
+  const current = stylePresets.find((s) => s.id === stylePreset) ?? stylePresets[0];
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        title={`Style: ${current.label}`}
+        className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary"
+      >
+        <Palette className="h-3.5 w-3.5" />
+        <span>{current.label}</span>
+      </button>
+      <PopoverContent open={open} onClose={() => setOpen(false)} buttonRef={buttonRef} anchor="bottom-start" width={224}>
+        {stylePresets.map((style) => (
+          <button
+            key={style.id}
+            type="button"
+            onClick={() => {
+              setStylePreset(style.id);
+              setOpen(false);
+            }}
+            className={`flex w-full flex-col gap-0.5 rounded-control px-3 py-2 text-left transition ${
+              stylePreset === style.id
+                ? "bg-primary/12 text-text-primary"
+                : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+            }`}
+          >
+            <span className="text-xs font-medium">{style.label}</span>
+            <span className="text-[10px] opacity-70">{style.description}</span>
+          </button>
+        ))}
+      </PopoverContent>
+    </div>
+  );
+}
+
+function ResolutionSelector({ resolutions, selected, onChange }: { resolutions: ImageResolution[], selected: ImageResolution, onChange: (res: ImageResolution) => void }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const resolutionLabels: Record<ImageResolution, string> = {
+    "0.5k": "512px",
+    "1k": "1024px",
+    "2k": "2048px",
+    "4k": "4096px",
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        title={`Resolution: ${resolutionLabels[selected]}`}
+        className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary"
+      >
+        <span>{resolutionLabels[selected]}</span>
+      </button>
+      <PopoverContent open={open} onClose={() => setOpen(false)} buttonRef={buttonRef} anchor="bottom-start" width={128}>
+        {resolutions.map((res) => (
+          <button
+            key={res}
+            type="button"
+            onClick={() => {
+              onChange(res);
+              setOpen(false);
+            }}
+            className={`flex w-full items-center rounded-control px-3 py-2 text-xs transition ${
+              selected === res
+                ? "bg-primary/12 text-text-primary"
+                : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+            }`}
+          >
+            {resolutionLabels[res]}
+          </button>
+        ))}
+      </PopoverContent>
+    </div>
+  );
+}
+
+function QualitySelector({ levels, selected, onChange }: { levels: ImageQuality[], selected: ImageQuality, onChange: (q: ImageQuality) => void }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+
+  const qualityLabels: Record<ImageQuality, string> = {
+    "auto": "Auto",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+  };
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        title={`Quality: ${qualityLabels[selected]}`}
+        className="flex h-9 items-center gap-1 rounded-control px-2 text-xs font-medium text-text-muted transition hover:bg-surface-elevated hover:text-text-primary"
+      >
+        <span>{qualityLabels[selected]}</span>
+      </button>
+      <PopoverContent open={open} onClose={() => setOpen(false)} buttonRef={buttonRef} anchor="bottom-start" width={128}>
+        {levels.map((level) => (
+          <button
+            key={level}
+            type="button"
+            onClick={() => {
+              onChange(level);
+              setOpen(false);
+            }}
+            className={`flex w-full items-center rounded-control px-3 py-2 text-xs transition ${
+              selected === level
+                ? "bg-primary/12 text-text-primary"
+                : "text-text-muted hover:bg-surface-elevated hover:text-text-primary"
+            }`}
+          >
+            {qualityLabels[level]}
+          </button>
+        ))}
+      </PopoverContent>
     </div>
   );
 }

@@ -4,22 +4,22 @@ import { motion } from "framer-motion";
 import { CalendarPlus, Download, Save, Type } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { ImageWithLogo, type LogoOverlayData } from "@/components/image-with-logo";
 import { ImageDetailPopup } from "@/features/campaigns/image-detail-popup";
 import { TextOverlayModal } from "@/features/campaigns/text-overlay-modal";
+import { downloadFile } from "@/lib/download";
 import { useToastStore } from "@/stores/toast-store";
 import type { Asset } from "@/types/domain";
 
 function downloadAsset(asset: Asset) {
   if (!asset.preview) return;
-  const a = document.createElement("a");
-  a.href = asset.preview;
-  a.download = `${asset.title || "image"}.png`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  downloadFile(asset.preview, `${asset.title || "image"}.png`).catch(() => {
+    // Fallback: open in new tab if fetch fails
+    window.open(asset.preview, "_blank");
+  });
 }
 
-export function WorkspaceAssetCard({ asset, onSave, onSchedule, onEditComplete, busy }: { asset: Asset; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void; busy?: boolean }) {
+export function WorkspaceAssetCard({ asset, logoOverlay, onSave, onSchedule, onEditComplete, busy }: { asset: Asset; logoOverlay?: LogoOverlayData; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void; busy?: boolean }) {
   const [showDetail, setShowDetail] = useState(false);
   const [showTextOverlay, setShowTextOverlay] = useState(false);
   const addToast = useToastStore((s) => s.addToast);
@@ -47,7 +47,14 @@ export function WorkspaceAssetCard({ asset, onSave, onSchedule, onEditComplete, 
         transition={{ duration: 0.28 }}
       >
         {isImage ? (
-          <img src={asset.preview} alt={asset.title ?? "Generated"} className="absolute inset-0 h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-105" onClick={() => setShowDetail(true)} />
+          <div className="absolute inset-0 h-full w-full cursor-pointer overflow-hidden" onClick={() => setShowDetail(true)}>
+            <ImageWithLogo
+              src={asset.preview}
+              alt={asset.title ?? "Generated"}
+              logoOverlay={logoOverlay}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          </div>
         ) : (
           <div className="absolute inset-0 flex cursor-pointer flex-col justify-between bg-surface-muted p-4" onClick={() => setShowDetail(true)}>
             <Badge tone="primary" className="self-start">{asset.channel}</Badge>
@@ -66,7 +73,7 @@ export function WorkspaceAssetCard({ asset, onSave, onSchedule, onEditComplete, 
         </div>
       </motion.div>
 
-      {showDetail && <ImageDetailPopup asset={asset} onClose={() => setShowDetail(false)} onSave={onSave} onSchedule={onSchedule} onEditComplete={onEditComplete} />}
+      {showDetail && <ImageDetailPopup asset={asset} logoOverlay={logoOverlay} onClose={() => setShowDetail(false)} onSave={onSave} onSchedule={onSchedule} onEditComplete={onEditComplete} />}
       {showTextOverlay && asset.preview && <TextOverlayModal imageUrl={asset.preview} onClose={() => setShowTextOverlay(false)} onSave={handleTextOverlaySave} />}
     </>
   );

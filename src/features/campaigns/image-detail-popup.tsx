@@ -3,21 +3,21 @@
 import { CalendarPlus, Copy, Download, Pencil, Save, X } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { ImageWithLogo, type LogoOverlayData } from "@/components/image-with-logo";
 import { ImageEditModal } from "@/features/campaigns/image-edit-modal";
+import { downloadFile } from "@/lib/download";
 import { useToastStore } from "@/stores/toast-store";
 import type { Asset } from "@/types/domain";
 
 function downloadAsset(asset: Asset) {
   if (!asset.preview) return;
-  const a = document.createElement("a");
-  a.href = asset.preview;
-  a.download = `${asset.title || "image"}.png`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  downloadFile(asset.preview, `${asset.title || "image"}.png`).catch(() => {
+    // Fallback: open in new tab if fetch fails
+    window.open(asset.preview, "_blank");
+  });
 }
 
-export function ImageDetailPopup({ asset, onClose, onSave, onSchedule, onEditComplete }: { asset: Asset; onClose: () => void; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void }) {
+export function ImageDetailPopup({ asset, logoOverlay, onClose, onSave, onSchedule, onEditComplete }: { asset: Asset; logoOverlay?: LogoOverlayData; onClose: () => void; onSave: (a: Asset) => void; onSchedule: (a: Asset) => void; onEditComplete?: (instruction: string, newAsset: Asset) => void }) {
   const [editing, setEditing] = useState(false);
   const addToast = useToastStore((s) => s.addToast);
   const isImage = asset.kind === "image" && (asset.preview?.startsWith("http") || asset.preview?.startsWith("data:"));
@@ -33,7 +33,12 @@ export function ImageDetailPopup({ asset, onClose, onSave, onSchedule, onEditCom
           {/* Content */}
           {isImage ? (
             <div className="flex items-center justify-center overflow-hidden rounded-card bg-black/20">
-              <img src={asset.preview} alt={asset.title ?? "Image"} className="max-h-[65vh] w-auto object-contain" />
+              <ImageWithLogo
+                src={asset.preview}
+                alt={asset.title ?? "Image"}
+                logoOverlay={logoOverlay}
+                className="max-h-[65vh] w-auto object-contain"
+              />
             </div>
           ) : (
             <div className="rounded-card bg-surface-muted p-6">

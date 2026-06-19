@@ -4,9 +4,23 @@ import { persistRemoteImage } from "@/lib/supabase/storage";
 import googleAI from "@/lib/google-ai";
 import fal from "@/lib/fal-ai";
 import { NextResponse } from "next/server";
+import type { AIModel, ImageResolution, ImageQuality } from "@/stores/chat-store";
 
 // Extend API route timeout for long-running AI generation
 export const maxDuration = 300; // 5 minutes for Vercel/serverless
+
+// Model endpoint mapping
+const MODEL_ENDPOINTS: Record<AIModel, string> = {
+  "nano-banana-2": "fal-ai/nano-banana-2",
+  "nano-banana-2-edit": "fal-ai/nano-banana-2/edit",
+  "nano-banana-pro-edit": "fal-ai/nano-banana-pro/edit",
+  "gpt-image-2-edit": "openai/gpt-image-2/edit",
+  "seedream-v5-lite": "fal-ai/bytedance/seedream/v5/lite/edit",
+  "flux-schnell": "fal-ai/flux/schnell",
+};
+
+// Models that support text-to-image generation without image input
+const TEXT_TO_IMAGE_MODELS: AIModel[] = ["nano-banana-2", "flux-schnell"];
 
 // Persist a generated image URL to Supabase Storage and return the permanent URL
 async function persistGeneratedImage(tempUrl: string, campaignId: string, generationId: string): Promise<string> {
@@ -50,7 +64,7 @@ async function enhancePrompt(prompt: string, brandContext: string, channel: stri
       contents: `Short prompt: "${prompt}"`,
       config: {
         systemInstruction: [
-          "You are a prompt engineer for AI image generation (Flux model).",
+          "You are a prompt engineer for AI image generation.",
           "Convert short or vague descriptions into detailed, visually rich prompts.",
           "Include: lighting, composition, style, color palette, mood, camera angle, and quality keywords.",
           brandContext ? `Brand context: ${brandContext}` : "",
@@ -65,6 +79,131 @@ async function enhancePrompt(prompt: string, brandContext: string, channel: stri
     console.error("AI prompt enhancement failed, using local template:", err);
     return localEnhance(prompt, channel);
   }
+}
+
+// Generate image with specific model
+async function generateWithModel(
+  model: AIModel,
+  prompt: string,
+  options: {
+    images?: string[];
+    aspectRatio?: string;
+    resolution?: ImageResolution;
+    quality?: ImageQuality;
+    numImages?: number;
+    channel?: string;
+  }
+): Promise<{ url: string }[]> {
+  const { images, aspectRatio, resolution, quality, numImages = 1, channel } = options;
+  const endpoint = MODEL_ENDPOINTS[model];
+
+  console.log(`[Generate] Using model: ${model}, endpoint: ${endpoint}`);
+
+  // Text-to-image models (no image input)
+  if (TEXT_TO_IMAGE_MODELS.includes(model)) {
+    if (model === "flux-schnell") {
+      // Flux Schnell - simple text-to-image
+      const result = await fal.subscribe(endpoint, {
+        input: {
+          prompt,
+          image_size: "square_hd",
+          num_images: numImages,
+          num_inference_steps: 4,
+        },
+      });
+      return (result.data as { images: { url: string }[] }).images || [];
+    } else {
+      // Nano Banana 2 - text-to-image with resolution enum
+      const result = await fal.subscribe(endpoint, {
+        input: {
+          prompt,
+          resolution: (resolution || "1k").toUpperCase(),
+          num_images: numImages,
+        },
+      });
+      return (result.data as { images: { url: string }[] }).images || [];
+    }
+  }
+
+  // Image editing models (require image input)
+  if (!images || images.length === 0) {
+    throw new Error(`${model} requires image input`);
+  }
+
+  // Upload images to fal storage first
+  const uploadedUrls: string[] = [];
+  for (const img of images) {
+    if (img.startsWith("data:image/")) {
+      const mimeMatch = img.match(/^data:(image\/\w+);base64,/);
+      const mime = mimeMatch?.[1] ?? "image/png";
+      const ext = mime.split("/")[1] ?? "png";
+      const base64Data = img.replace(/^data:image\/\w+;base64,/, "");
+      const buffer = Buffer.from(base64Data, "base64");
+      const blob = new Blob([buffer], { type: mime });
+      const file = new File([blob], `upload_${Date.now()}.${ext}`, { type: mime });
+      const url = await fal.storage.upload(file);
+      uploadedUrls.push(url);
+    } else {
+      uploadedUrls.push(img);
+    }
+  }
+
+  // Nano Banana 2 Edit - uses image_urls array, resolution enum (not width/height)
+  if (model === "nano-banana-2-edit") {
+    const result = await fal.subscribe(endpoint, {
+      input: {
+        prompt,
+        image_urls: uploadedUrls,
+        resolution: (resolution || "1k").toUpperCase(),
+        num_images: numImages,
+      },
+    });
+    return (result.data as { images: { url: string }[] }).images || [];
+  }
+
+  // Nano Banana Pro Edit - uses image_urls array, resolution enum (not width/height)
+  if (model === "nano-banana-pro-edit") {
+    const result = await fal.subscribe(endpoint, {
+      input: {
+        prompt,
+        image_urls: uploadedUrls,
+        resolution: (resolution || "1k").toUpperCase(),
+        num_images: numImages,
+      },
+    });
+    return (result.data as { images: { url: string }[] }).images || [];
+  }
+
+  // GPT Image 2 Edit
+  if (model === "gpt-image-2-edit") {
+    // GPT uses different parameter names
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await fal.subscribe(endpoint, {
+      input: {
+        prompt,
+        image: uploadedUrls[0],
+        quality: quality || "auto",
+        n: numImages,
+      } as any,
+    });
+    // GPT returns data in different format
+    const responseImages = (result.data as { data?: { url: string }[] })?.data || [];
+    return responseImages.map((img) => ({ url: img.url }));
+  }
+
+  // Seedream v5 Lite - requires image_urls (array of URLs)
+  if (model === "seedream-v5-lite") {
+    const result = await fal.subscribe(endpoint, {
+      input: {
+        prompt,
+        image_urls: uploadedUrls,
+        num_images: numImages,
+      },
+    });
+    return (result.data as { images: { url: string }[] }).images || [];
+  }
+
+  throw new Error(`Unsupported model: ${model}`);
 }
 
 export async function GET(request: Request) {
@@ -90,17 +229,50 @@ export async function POST(request: Request) {
   const workspaceId = await getWorkspaceId();
   if (!workspaceId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { campaign_id, mode, prompt, channel, images, aspect_ratio } = await request.json();
+  const { 
+    campaign_id, 
+    mode, 
+    prompt, 
+    channel, 
+    images, 
+    aspect_ratio, 
+    num_images = 1, 
+    style_preset = "none",
+    model = "nano-banana-2",
+    resolution = "1k",
+    quality = "auto"
+  } = await request.json();
   if (!campaign_id || !mode || !prompt) {
     return NextResponse.json({ error: "campaign_id, mode, dan prompt wajib diisi." }, { status: 400 });
   }
 
+  // Validate mode + model compatibility (before hitting the model call)
+  if (mode === "text-to-image" && !TEXT_TO_IMAGE_MODELS.includes(model)) {
+    const editingOnly = model; // not nano-banana-2/flux-schnell => requires images
+    return NextResponse.json({
+      error: `Model "${editingOnly}" tidak mendukung text-to-image. Pilih nano-banana-2 atau flux-schnell, atau gunakan mode image-to-image.`
+    }, { status: 400 });
+  }
+
+  // Validate num_images (1, 2, or 4)
+  const validBatchCounts = [1, 2, 4];
+  const batchSize = validBatchCounts.includes(num_images) ? num_images : 1;
+
+  // Style preset modifiers
+  const styleModifiers: Record<string, string> = {
+    photorealistic: "photorealistic, natural lighting, high detail, realistic textures, professional photography",
+    minimalist: "minimalist design, clean composition, simple elements, white space, modern aesthetic",
+    bold: "bold colors, high contrast, vibrant, eye-catching, impactful design, strong visual impact",
+    creative: "creative, artistic, unique perspective, unconventional composition, imaginative, artistic flair",
+  };
+  const styleModifier = styleModifiers[style_preset] || "";
+
   const supabase = await createClient();
 
-  // Ambil brand kit
+  // Ambil brand kit (all fields for toggle-aware prompt building)
   const { data: brandKit } = await supabase
     .from("brand_kits")
-    .select("voice, colors, guardrails")
+    .select("voice, colors, guardrails, typography, brand_values, voice_enabled, colors_enabled, guardrails_enabled, typography_enabled, brand_values_enabled, logo_enabled, logo_url, logo_position, logo_size_percent")
     .eq("workspace_id", workspaceId)
     .single();
 
@@ -117,51 +289,69 @@ export async function POST(request: Request) {
     let outputAssets: { title: string; kind: string; preview: string; prompt: string }[] = [];
 
     if (mode === "text-to-image") {
-      const brandContext = brandKit
-        ? `Style: ${brandKit.voice ?? "professional"}. Colors: ${brandKit.colors?.join(", ") ?? "brand colors"}. ${brandKit.guardrails?.length ? `Avoid: ${brandKit.guardrails.join(", ")}.` : ""}`
-        : "";
+      // Build brand context respecting toggle states
+      const parts: string[] = [];
+      if (brandKit) {
+        if (brandKit.voice_enabled && brandKit.voice) {
+          parts.push(`Style: ${brandKit.voice}`);
+        }
+        if (brandKit.colors_enabled && brandKit.colors?.length) {
+          parts.push(`Colors: ${brandKit.colors.join(", ")}`);
+        }
+        if (brandKit.guardrails_enabled && brandKit.guardrails?.length) {
+          parts.push(`Avoid: ${brandKit.guardrails.join(", ")}`);
+        }
+        if (brandKit.typography_enabled && brandKit.typography) {
+          parts.push(`Typography style: ${brandKit.typography}`);
+        }
+        if (brandKit.brand_values_enabled && brandKit.brand_values?.length) {
+          parts.push(`Brand feeling: ${brandKit.brand_values.join(", ")}`);
+        }
+      }
+      const brandContext = parts.join(". ");
 
       // Enhance prompt dengan Gemini (gratis) untuk hasil image generation yang lebih baik
       console.log("[Enhance] Original prompt:", prompt);
       const enhancedPrompt = await enhancePrompt(prompt, brandContext, channel ?? "social media");
       console.log("[Enhance] Enhanced prompt:", enhancedPrompt);
 
-      const fullPrompt = `${enhancedPrompt}. ${brandContext} High quality, ${channel ?? "social media"} format, marketing visual.`;
+      // Apply style preset
+      const stylePart = styleModifier ? `, ${styleModifier}` : "";
+      const fullPrompt = `${enhancedPrompt}${stylePart}. ${brandContext} High quality, ${channel ?? "social media"} format, marketing visual.`;
 
-      // Map aspect_ratio to fal.ai image_size
-      const sizeMap = {
-        "1:1": "square_hd",
-        "16:9": "landscape_16_9",
-        "9:16": "portrait_16_9",
-        "4:3": "landscape_4_3",
-        "3:4": "portrait_4_3",
-      } as const;
-      const imageSize = sizeMap[aspect_ratio as keyof typeof sizeMap] ?? "square_hd";
+      console.log(`[Generate] Batch size: ${batchSize}, Style: ${style_preset}, Model: ${model}`);
 
-      const result = await fal.subscribe("fal-ai/flux/schnell", {
-        input: {
-          prompt: fullPrompt,
-          image_size: imageSize,
-          num_images: 1,
-          num_inference_steps: 4,
-        },
+      // Call model with new routing system
+      const generatedImages = await generateWithModel(model, fullPrompt, {
+        aspectRatio: aspect_ratio,
+        resolution,
+        quality,
+        numImages: batchSize,
+        channel,
       });
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tempImageUrl = (result.data as any).images?.[0]?.url ?? "";
+      console.log(`[Generate] Received ${generatedImages.length} image(s) from model`);
 
-      // Persist generated image to Supabase Storage
-      const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, generation.id);
+      // Persist all images and build outputAssets
+      for (let i = 0; i < generatedImages.length; i++) {
+        const tempImageUrl = generatedImages[i].url;
+        const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, `${generation.id}_${i}`);
+        const title = generatedImages.length > 1 ? `Generated Image ${i + 1}` : "Generated Image";
+        outputAssets.push({ title, kind: "image", preview: imageUrl, prompt: enhancedPrompt });
+      }
 
-      outputAssets = [{ title: "Generated Image", kind: "image", preview: imageUrl, prompt: enhancedPrompt }];
+      console.log(`[Generate] Persisted ${outputAssets.length} image(s)`);
 
     } else if (mode === "image-to-image") {
       if (!images || images.length === 0) {
         return NextResponse.json({ error: "Images must be provided for image-to-image mode." }, { status: 400 });
       }
 
-      if (images.length > 5) {
-        return NextResponse.json({ error: "Maximum 5 images allowed for image-to-image generation." }, { status: 400 });
+      // Get max images for selected model
+      const maxImages = model === "seedream-v5-lite" ? 5 : 10;
+      
+      if (images.length > maxImages) {
+        return NextResponse.json({ error: `Maximum ${maxImages} images allowed for ${model}.` }, { status: 400 });
       }
 
       // Validate all images
@@ -172,98 +362,37 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "No valid images provided. Use data URI or URL format." }, { status: 400 });
       }
 
-      console.log(`[Image-to-Image] Processing ${validImages.length} image(s)`);
+      console.log(`[Image-to-Image] Processing ${validImages.length} image(s) with model: ${model}`);
 
-      // Map aspect_ratio to fal.ai supported values for kontext endpoints
-      // Supported: 21:9, 16:9, 4:3, 3:2, 1:1, 2:3, 3:4, 9:16, 9:21
-      type KontextAspect = "1:1" | "16:9" | "9:16" | "4:3" | "3:4" | "2:3" | "3:2" | "21:9" | "9:21";
-      const kontextAspectMap: Record<string, KontextAspect> = {
-        "1:1": "1:1",
-        "4:5": "3:4",   // 4:5 not supported, closest is 3:4
-        "9:16": "9:16",
-        "16:9": "16:9",
-        "4:3": "4:3",
-        "3:2": "3:2",
-      };
-      const mappedAspect: KontextAspect | undefined = aspect_ratio ? (kontextAspectMap[aspect_ratio] ?? "1:1") : undefined;
+      // Apply style modifier to prompt if needed
+      const stylePart = styleModifier ? `, ${styleModifier}` : "";
+      const fullPrompt = `${prompt}${stylePart}. High quality, ${channel ?? "social media"} format.`;
 
-      // Upload base64 images to fal.ai storage to avoid oversized payloads
-      const uploadedUrls: string[] = [];
-      for (let i = 0; i < validImages.length; i++) {
-        const img = validImages[i];
-        try {
-          if (img.startsWith("data:image/")) {
-            const mimeMatch = img.match(/^data:(image\/\w+);base64,/);
-            const mime = mimeMatch?.[1] ?? "image/png";
-            const ext = mime.split("/")[1] ?? "png";
-            const base64Data = img.replace(/^data:image\/\w+;base64,/, "");
-            const buffer = Buffer.from(base64Data, "base64");
-            const blob = new Blob([buffer], { type: mime });
-            const file = new File([blob], `upload_${i}.${ext}`, { type: mime });
-            const url = await fal.storage.upload(file);
-            uploadedUrls.push(url);
-            console.log(`[Image-to-Image] Uploaded image ${i + 1}/${validImages.length} to fal storage`);
-          } else {
-            uploadedUrls.push(img);
-            console.log(`[Image-to-Image] Using existing URL for image ${i + 1}/${validImages.length}`);
-          }
-        } catch (uploadErr) {
-          console.error(`[Image-to-Image] Failed to upload image ${i + 1}:`, uploadErr);
-          throw new Error(`Failed to upload image ${i + 1}: ${uploadErr instanceof Error ? uploadErr.message : "Unknown error"}`);
-        }
-      }
+      // Call model with new routing system
+      const generatedImages = await generateWithModel(model, fullPrompt, {
+        images: validImages,
+        aspectRatio: aspect_ratio,
+        resolution,
+        quality,
+        numImages: batchSize,
+        channel,
+      });
 
-      console.log(`[Image-to-Image] Uploaded ${uploadedUrls.length} image(s) to fal storage`);
-
-      let tempImageUrl = "";
-
-      try {
-        console.log(`[Image-to-Image] Calling fal.ai with ${uploadedUrls.length > 1 ? "kontext/multi" : "kontext"}...`);
-        
-        if (uploadedUrls.length === 1) {
-          // Single image: use standard kontext endpoint
-          const result = await fal.subscribe("fal-ai/flux-pro/kontext", {
-            input: {
-              prompt: `${prompt}. Preserve the original image structure and composition. High quality, ${channel ?? "social media"} format.`,
-              image_url: uploadedUrls[0],
-              aspect_ratio: mappedAspect,
-              num_images: 1,
-            },
-          });
-          console.log("[Image-to-Image] Single image result:", result);
-          tempImageUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
-        } else {
-          // Multiple images: use multi-image kontext endpoint
-          const result = await fal.subscribe("fal-ai/flux-pro/kontext/multi", {
-            input: {
-              prompt: `${prompt}. Combine and blend these images into a single cohesive composition. High quality, ${channel ?? "social media"} format.`,
-              image_urls: uploadedUrls,
-              aspect_ratio: mappedAspect,
-              num_images: 1,
-            },
-          });
-          console.log("[Image-to-Image] Multi image result:", result);
-          tempImageUrl = (result.data as { images?: { url: string }[] })?.images?.[0]?.url ?? "";
-        }
-      } catch (falErr) {
-        console.error("[Image-to-Image] fal.ai API error:", falErr);
-        const errMsg = falErr instanceof Error ? falErr.message : "fal.ai API error";
-        await supabase.from("ai_generations").update({ status: "error", error_message: errMsg }).eq("id", generation.id);
-        return NextResponse.json({ error: `Image generation failed: ${errMsg}` }, { status: 500 });
-      }
-
-      if (!tempImageUrl) {
-        console.error("[Image-to-Image] No image URL returned from fal.ai");
+      if (!generatedImages || generatedImages.length === 0) {
+        console.error("[Image-to-Image] No image returned from model");
         await supabase.from("ai_generations").update({ status: "error", error_message: "AI did not return an image" }).eq("id", generation.id);
         return NextResponse.json({ error: "AI did not return an image" }, { status: 500 });
       }
 
-      console.log(`[Image-to-Image] Got temp image URL, persisting to storage...`);
+      console.log(`[Image-to-Image] Got ${generatedImages.length} image(s), persisting to storage...`);
 
-      // Persist generated image to Supabase Storage
-      const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, generation.id);
-
-      outputAssets = [{ title: uploadedUrls.length > 1 ? "Combined Image" : "Transformed Image", kind: "image", preview: imageUrl, prompt }];
+      // Persist all images and build outputAssets
+      for (let i = 0; i < generatedImages.length; i++) {
+        const tempImageUrl = generatedImages[i].url;
+        const imageUrl = await persistGeneratedImage(tempImageUrl, campaign_id, `${generation.id}_${i}`);
+        const title = generatedImages.length > 1 ? `Edited Image ${i + 1}` : "Edited Image";
+        outputAssets.push({ title, kind: "image", preview: imageUrl, prompt });
+      }
 
     } else if (mode === "caption") {
       const systemPrompt = [
@@ -311,25 +440,55 @@ export async function POST(request: Request) {
       .eq("id", generation.id);
 
     // Return enhanced prompt di response agar user tahu prompt yang dipakai AI
+    // Also return brand kit logo info so frontend can apply overlay
     const responsePrompt = outputAssets[0]?.prompt || prompt;
+    const logoOverlay = brandKit?.logo_enabled && brandKit?.logo_url
+      ? {
+          logoUrl: brandKit.logo_url,
+          position: brandKit.logo_position ?? "bottom-right",
+          sizePercent: brandKit.logo_size_percent ?? 15,
+        }
+      : undefined;
+
     return NextResponse.json({ 
       generation: { 
         ...generation, 
         status: "completed", 
         outputAssets: assets,
-        enhancedPrompt: mode === "text-to-image" ? responsePrompt : undefined 
+        enhancedPrompt: mode === "text-to-image" ? responsePrompt : undefined,
+        logoOverlay,
       } 
     }, { status: 201 });
 
   } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error("Generate error:", errorMessage);
+    // Extract detailed error info from fal.ai / generic errors
+    let errorMessage = "Unknown generation error";
+    let errorDetail = "";
+
+    if (err instanceof Error) {
+      errorMessage = err.message;
+      // fal.ai errors often have response body details
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errAny = err as any;
+      if (errAny?.response?.data) {
+        errorDetail = typeof errAny.response.data === "string"
+          ? errAny.response.data
+          : JSON.stringify(errAny.response.data);
+      } else if (errAny?.cause?.message) {
+        errorDetail = errAny.cause.message;
+      }
+    } else {
+      errorMessage = String(err);
+    }
+
+    const fullError = errorDetail ? `${errorMessage}: ${errorDetail}` : errorMessage;
+    console.error("Generate error:", fullError);
 
     await supabase
       .from("ai_generations")
-      .update({ status: "error", error_message: errorMessage })
+      .update({ status: "error", error_message: fullError })
       .eq("id", generation.id);
 
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ error: fullError }, { status: 500 });
   }
 }

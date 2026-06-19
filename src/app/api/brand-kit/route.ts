@@ -22,17 +22,37 @@ export async function POST(request: Request) {
   if (!workspaceId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
-  const { name, voice, colors, logo_url, guardrails } = body;
+  const input = {
+    workspace_id: workspaceId,
+    name: body.name,
+    voice: body.voice,
+    colors: body.colors ?? [],
+    logo_url: body.logo_url,
+    guardrails: body.guardrails ?? [],
+    logo_enabled: body.logo_enabled ?? false,
+    logo_position: body.logo_position ?? "bottom-right",
+    logo_size_percent: body.logo_size_percent ?? 15,
+    voice_enabled: body.voice_enabled ?? true,
+    colors_enabled: body.colors_enabled ?? true,
+    guardrails_enabled: body.guardrails_enabled ?? true,
+    typography: body.typography,
+    typography_enabled: body.typography_enabled ?? false,
+    brand_values: body.brand_values ?? [],
+    brand_values_enabled: body.brand_values_enabled ?? false,
+  };
 
-  if (!name) return NextResponse.json({ error: "Nama brand kit wajib diisi." }, { status: 400 });
+  if (!input.name) return NextResponse.json({ error: "Nama brand kit wajib diisi." }, { status: 400 });
 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("brand_kits")
-    .insert({ workspace_id: workspaceId, name, voice, colors: colors ?? [], logo_url, guardrails: guardrails ?? [] })
+    .insert(input)
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[BrandKit POST] DB error:", error);
+    return NextResponse.json({ error: error.message, details: error }, { status: 500 });
+  }
   return NextResponse.json(data, { status: 201 });
 }
