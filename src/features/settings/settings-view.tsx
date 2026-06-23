@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Bell, Link2, Sparkles, User } from "lucide-react";
+import { AlertTriangle, Bell, Key, Link2, Sparkles, User } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ export function SettingsView() {
       {activeTab === "notifications" && <NotificationsSection />}
       {activeTab === "connected" && <ConnectedSection />}
       {activeTab === "danger" && <DangerSection />}
+      <ChangePasswordSection />
     </section>
   );
 }
@@ -202,5 +203,56 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
         <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-6" : "translate-x-1"}`} />
       </button>
     </label>
+  );
+}
+
+function ChangePasswordSection() {
+  const addToast = useToastStore((s) => s.addToast);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  async function handleChangePassword() {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      addToast("error", "Please fill in all fields");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      addToast("error", "New passwords do not match");
+      return;
+    }
+    if (newPassword.length < 8) {
+      addToast("error", "Password must be at least 8 characters");
+      return;
+    }
+    setIsLoading(true);
+    // Simulate API call
+    await new Promise((r) => setTimeout(r, 1000));
+    addToast("success", "Password changed successfully");
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setIsLoading(false);
+  }
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="flex items-center gap-2"><Key className="h-4 w-4" /> Change Password</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        <Field label="Current Password">
+          <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" placeholder="Enter current password" />
+        </Field>
+        <Field label="New Password">
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" placeholder="Enter new password" />
+        </Field>
+        <Field label="Confirm New Password">
+          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="h-10 w-full rounded-control border bg-surface-muted px-3 text-sm text-text-primary outline-none focus:border-accent/60" placeholder="Confirm new password" />
+        </Field>
+        <Button size="sm" onClick={handleChangePassword} disabled={isLoading}>
+          {isLoading ? "Changing..." : "Change Password"}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

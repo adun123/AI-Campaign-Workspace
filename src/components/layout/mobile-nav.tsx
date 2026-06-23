@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { CalendarDays, FolderOpen, ImageIcon, LayoutDashboard, Palette, Settings, Sparkles, TrendingUp, WandSparkles } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { CalendarDays, FolderOpen, ImageIcon, LayoutDashboard, LogOut, Palette, Settings, Sparkles, TrendingUp, WandSparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { logout } from "@/services/auth.service";
 
 const items = [
   { href: "/dashboard", label: "Dash", icon: LayoutDashboard },
@@ -19,6 +20,12 @@ const items = [
 
 export function MobileNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    await logout();
+    router.push("/login");
+  }
 
   return (
     <nav className="fixed inset-x-3 bottom-3 z-30 flex gap-1 overflow-x-auto rounded-card border bg-surface/92 p-2 shadow-soft backdrop-blur-xl lg:hidden">
@@ -27,6 +34,9 @@ export function MobileNav() {
           <item.icon className="h-4 w-4" /> {item.label}
         </Link>
       ))}
+      <button type="button" onClick={handleLogout} className="flex min-w-16 flex-col items-center gap-1 rounded-control px-2 py-2 text-xs text-text-muted transition hover:bg-error/10 hover:text-error">
+        <LogOut className="h-4 w-4" /> Out
+      </button>
     </nav>
   );
 }
